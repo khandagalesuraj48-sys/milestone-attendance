@@ -228,12 +228,22 @@ export default function App() {
               }`}
             >
               {/* Sidebar Header / Context */}
-              <div className="p-4 border-b border-slate-100 hidden lg:block">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Control Navigation
+              <div className="p-4 border-b border-slate-100 hidden lg:flex items-center space-x-3">
+                <div className="w-9 h-9 p-1 rounded-xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-center shrink-0">
+                  <img
+                    src="/assets/branding/milestone-logo.svg"
+                    alt="Milestone Consultancy"
+                    className="w-full h-full object-contain"
+                    referrerPolicy="no-referrer"
+                  />
                 </div>
-                <div className="text-xs font-semibold text-slate-800 truncate mt-0.5">
-                  Milestone Consultancy HQ
+                <div className="truncate">
+                  <div className="text-xs font-extrabold text-slate-900 truncate">
+                    Milestone Operations
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-medium truncate">
+                    Enterprise Command Center
+                  </div>
                 </div>
               </div>
 

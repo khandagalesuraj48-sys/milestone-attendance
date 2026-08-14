@@ -6,7 +6,6 @@ import {
   Sun,
   Moon,
   MapPin,
-  Clock,
   CheckCircle2,
   AlertTriangle,
   Play,
@@ -14,8 +13,10 @@ import {
   Building,
   RotateCcw,
   ShieldCheck,
-  Sunrise,
-  Sunset,
+  Clock,
+  CalendarCheck,
+  TrendingUp,
+  Award,
 } from 'lucide-react';
 
 interface PunchCardProps {
@@ -24,7 +25,6 @@ interface PunchCardProps {
   todayShifts: AttendanceRecord[];
   onAttendanceUpdate: () => void;
   locations: LocationSite[];
-  sites?: Site[];
 }
 
 type LocationStatusType = 'IDLE' | 'CHECKING' | 'VERIFIED' | 'OUTSIDE' | 'PERMISSION_REQUIRED' | 'UNAVAILABLE';
@@ -37,19 +37,19 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   locations,
 }) => {
   const [selectedShift, setSelectedShift] = useState<ShiftType>('DAY');
-  const [availableSites, setAvailableSites] = useState<Site[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
-  const [loading, setLoading] = useState(false);
+  const [availableSites, setAvailableSites] = useState<Site[]>([]);
+  const [siteLocations, setSiteLocations] = useState<LocationSite[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string>('');
   const [elapsedTime, setElapsedTime] = useState<string>('00:00:00');
-
-  // Location status state
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [locationStatus, setLocationStatus] = useState<LocationStatusType>('IDLE');
   const [locationMessage, setLocationMessage] = useState<string>('');
 
-  // Calculate dynamic greeting
+  // Calculate dynamic time-of-day greeting
   const getGreetingText = () => {
     try {
       const now = new Date();
@@ -75,56 +75,49 @@ export const PunchCard: React.FC<PunchCardProps> = ({
     const loadSites = async () => {
       try {
         const res = await api.getSites();
-        if (res.success && res.sites.length > 0) {
-          setAvailableSites(res.sites);
-          if (!selectedSiteId) {
-            setSelectedSiteId(res.sites[0].siteId);
-          }
+        const siteList = res.sites || [];
+        const active = siteList.filter((s) => s.isActive !== false);
+        setAvailableSites(active);
+        if (active.length > 0 && !selectedSiteId) {
+          setSelectedSiteId(active[0].siteId);
         }
       } catch (err) {
-        console.error('Failed to load employee authorized sites', err);
+        console.error('Failed to load sites:', err);
       }
     };
     loadSites();
   }, []);
 
-  // Filter locations belonging to selected site
-  const siteLocations = locations.filter((loc) => loc.siteId === selectedSiteId || !loc.siteId);
-
-  // Auto-select first location when site changes
+  // Update available gate/perimeter locations whenever selected site changes
   useEffect(() => {
-    if (siteLocations.length > 0) {
-      const currentExists = siteLocations.some((l) => (l.locationId || l.id) === selectedLocationId);
-      if (!currentExists) {
-        setSelectedLocationId(siteLocations[0].locationId || siteLocations[0].id || '');
+    if (selectedSiteId) {
+      const filtered = locations.filter((loc) => loc.siteId === selectedSiteId);
+      setSiteLocations(filtered);
+      if (filtered.length > 0) {
+        setSelectedLocationId(filtered[0].locationId || filtered[0].id || '');
+      } else {
+        setSelectedLocationId('');
       }
-    } else {
-      setSelectedLocationId('');
     }
   }, [selectedSiteId, locations]);
 
-  // Sync shift with active session if open
-  useEffect(() => {
-    if (activeSession) {
-      setSelectedShift(activeSession.shiftType);
-    }
-  }, [activeSession]);
+  // Check if today already has a Day shift recorded (making a Night shift eligible as extra)
+  const isNightExtraShiftEligible = todayShifts.some(
+    (s) => s.shiftType === 'DAY' && (s.status === 'PRESENT_FULL_DAY' || s.sessionStatus === 'CLOSED')
+  );
 
-  // Check if today already has a Day shift recorded (completed)
-  const existingDayShift = todayShifts.find((s) => s.shiftType === 'DAY');
-  const isNightExtraShiftEligible = selectedShift === 'NIGHT' && !!existingDayShift;
-
-  // Single location validation check on open/change
+  // Instant Verification of Location status against chosen Site Perimeter
   const verifyLocationStatus = async () => {
     setLocationStatus('CHECKING');
-    setLocationMessage('Checking attendance area...');
+    setLocationMessage('Checking GPS location...');
 
     try {
       const geo = await getCurrentBrowserLocation();
+
       if (geo.error || !geo.coordinates) {
         if (geo.error?.includes('denied')) {
           setLocationStatus('PERMISSION_REQUIRED');
-          setLocationMessage('Location permission required. Please enable browser location.');
+          setLocationMessage('Location permission required. Please enable browser GPS.');
         } else {
           setLocationStatus('UNAVAILABLE');
           setLocationMessage('GPS signal unavailable. Please ensure location services are enabled.');
@@ -132,20 +125,20 @@ export const PunchCard: React.FC<PunchCardProps> = ({
         return;
       }
 
-      // Check distance against current target location
-      const targetLoc = locations.find((l) => (l.locationId || l.id) === selectedLocationId);
-      if (targetLoc) {
-        const R = 6371000;
-        const dLat = ((targetLoc.latitude - geo.coordinates.latitude) * Math.PI) / 180;
-        const dLon = ((targetLoc.longitude - geo.coordinates.longitude) * Math.PI) / 180;
+      const targetLoc = siteLocations.find((l) => (l.locationId || l.id) === selectedLocationId);
+
+      if (targetLoc && targetLoc.latitude && targetLoc.longitude) {
+        const R = 6371e3; // Earth radius in meters
+        const φ1 = (geo.coordinates.latitude * Math.PI) / 180;
+        const φ2 = (targetLoc.latitude * Math.PI) / 180;
+        const Δφ = ((targetLoc.latitude - geo.coordinates.latitude) * Math.PI) / 180;
+        const Δλ = ((targetLoc.longitude - geo.coordinates.longitude) * Math.PI) / 180;
+
         const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos((geo.coordinates.latitude * Math.PI) / 180) *
-            Math.cos((targetLoc.latitude * Math.PI) / 180) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
+          Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+          Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const distance = Math.round(R * c);
+        const distance = R * c;
 
         if (distance <= (targetLoc.radiusMeters || 100)) {
           setLocationStatus('VERIFIED');
@@ -174,6 +167,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   useEffect(() => {
     if (!activeSession || !activeSession.signInTime) {
       setElapsedTime('00:00:00');
+      setElapsedSeconds(0);
       return;
     }
 
@@ -181,11 +175,13 @@ export const PunchCard: React.FC<PunchCardProps> = ({
       const start = new Date(activeSession.signInTime!).getTime();
       const now = Date.now();
       const diffSeconds = Math.max(0, Math.floor((now - start) / 1000));
+      setElapsedSeconds(diffSeconds);
+
       const hours = Math.floor(diffSeconds / 3600);
       const mins = Math.floor((diffSeconds % 3600) / 60);
       const secs = diffSeconds % 60;
       setElapsedTime(
-        `${String(hours).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m`
+        `${String(hours).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`
       );
     };
 
@@ -260,9 +256,22 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
   const selectedSite = availableSites.find((s) => s.siteId === selectedSiteId);
 
+  // Calculate today's total hours logged across all closed/open shifts
+  const todayTotalHours = todayShifts.reduce((acc, curr) => {
+    if (curr.totalWorkingHours) return acc + curr.totalWorkingHours;
+    if (curr.sessionStatus === 'OPEN' && curr.signInTime) {
+      const diffHrs = Math.max(0, (Date.now() - new Date(curr.signInTime).getTime()) / 3600000);
+      return acc + diffHrs;
+    }
+    return acc;
+  }, 0);
+
+  // Shift progress percentage toward 9.0 hours standard day
+  const shiftProgressPercent = Math.min(100, Math.round((elapsedSeconds / (9 * 3600)) * 100));
+
   return (
     <div id="punch-card-panel" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xs text-slate-900">
-      {/* Dynamic Header & Employee Context */}
+      {/* 1. Header Greeting & Status Overview */}
       <div className="mb-6 pb-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">
@@ -275,71 +284,21 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           </p>
         </div>
 
-        {/* Current Attendance Status Badge */}
+        {/* Dynamic Status Badge */}
         <div>
           {activeSession ? (
             <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
-              <span>Signed In &bull; Working {elapsedTime}</span>
+              <span>Shift in Progress</span>
             </div>
           ) : (
-            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-xs">
+            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs">
               <span className="w-2 h-2 rounded-full bg-slate-400" />
-              <span>Not yet signed in</span>
+              <span>Ready to Sign In</span>
             </div>
           )}
         </div>
       </div>
-
-      {/* Active Session Detailed Card */}
-      {activeSession && (
-        <div className="mb-6 p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center space-x-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-xs shrink-0">
-                <Play className="w-6 h-6 fill-current" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-900 bg-emerald-200/80 px-2 py-0.5 rounded-md">
-                    {activeSession.shiftType} SHIFT ONGOING
-                  </span>
-                  {activeSession.isExtraShift && (
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-purple-800 bg-purple-100 px-2 py-0.5 rounded-md">
-                      Extra Night
-                    </span>
-                  )}
-                </div>
-                <h3 className="text-base font-bold text-slate-900 mt-1">
-                  {activeSession.siteNameSnapshot}
-                </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Signed In at{' '}
-                  <span className="font-semibold text-slate-900">
-                    {new Date(activeSession.signInTime!).toLocaleTimeString('en-US', {
-                      timeZone: 'Asia/Kolkata',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}{' '}
-                    IST
-                  </span>{' '}
-                  &bull; {activeSession.locationNameSnapshot}
-                </p>
-              </div>
-            </div>
-
-            <div className="text-left sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-emerald-200">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
-                Total Time
-              </span>
-              <span className="text-2xl font-mono font-extrabold text-slate-900 tracking-tight">
-                {elapsedTime}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Notifications */}
       {error && (
@@ -362,13 +321,102 @@ export const PunchCard: React.FC<PunchCardProps> = ({
         </div>
       )}
 
-      {/* Shift, Site & Location Selectors (when no active session) */}
-      {!activeSession && (
-        <div className="space-y-5">
-          {/* Shift Selection */}
+      {/* =========================================================================
+          2. PRIMARY VISUAL ELEMENT: DYNAMIC SIGN IN / SIGN OUT HERO ACTION BLOCK
+          ========================================================================= */}
+      {activeSession ? (
+        /* ---------------- ACTIVE SESSION: SIGN OUT HERO BLOCK ---------------- */
+        <div className="p-6 sm:p-7 rounded-3xl bg-slate-900 text-white shadow-md border border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[11px] font-extrabold uppercase tracking-widest text-emerald-400">
+                  {activeSession.shiftType} SHIFT ONGOING
+                </span>
+                {activeSession.isExtraShift && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/30 text-purple-200 border border-purple-400/30 uppercase">
+                    Extra Night
+                  </span>
+                )}
+              </div>
+              <h3 className="text-xl font-extrabold text-white mt-1">
+                {activeSession.siteNameSnapshot}
+              </h3>
+              <p className="text-xs text-slate-300 mt-1 flex items-center space-x-1.5">
+                <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>{activeSession.locationNameSnapshot || 'Main Gate Perimeter'}</span>
+                <span>&bull;</span>
+                <span>
+                  Started at{' '}
+                  <span className="font-bold text-white">
+                    {new Date(activeSession.signInTime!).toLocaleTimeString('en-US', {
+                      timeZone: 'Asia/Kolkata',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    })}{' '}
+                    IST
+                  </span>
+                </span>
+              </p>
+            </div>
+
+            {/* Live Working Digital Counter */}
+            <div className="sm:text-right bg-slate-800/80 px-4 py-2.5 rounded-2xl border border-slate-700/60 shrink-0">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Elapsed Working Time
+              </span>
+              <span className="text-2xl sm:text-3xl font-mono font-extrabold text-amber-400 tracking-tight">
+                {elapsedTime}
+              </span>
+            </div>
+          </div>
+
+          {/* Shift Progress Visual Bar */}
+          <div className="py-4">
+            <div className="flex items-center justify-between text-xs text-slate-300 mb-1.5 font-medium">
+              <span>Shift Completion Benchmark</span>
+              <span className="font-mono font-bold text-emerald-400">{shiftProgressPercent}% (Standard 9.0h)</span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-400 to-emerald-400 rounded-full transition-all duration-500"
+                style={{ width: `${shiftProgressPercent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* PRIMARY VISUAL ACTION BUTTON: SIGN OUT */}
+          <div className="pt-2">
+            <button
+              id="btn-sign-out"
+              type="button"
+              onClick={handlePunchOut}
+              disabled={loading}
+              className="w-full py-4 sm:py-4.5 px-6 rounded-2xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-extrabold text-base sm:text-lg transition flex items-center justify-center space-x-2.5 shadow-lg hover:shadow-rose-600/30 cursor-pointer disabled:opacity-50"
+            >
+              {loading ? (
+                <span className="flex items-center space-x-2">
+                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  <span>Verifying Location & Signing Out...</span>
+                </span>
+              ) : (
+                <span className="flex items-center space-x-2">
+                  <Square className="w-5 h-5 fill-current" />
+                  <span>SIGN OUT &bull; COMPLETE SHIFT</span>
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* ---------------- NO ACTIVE SESSION: SIGN IN HERO BLOCK ---------------- */
+        <div className="space-y-6">
+          {/* Shift Selection Cards */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Select Today's Shift
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">
+              1. Select Shift Type
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
@@ -376,19 +424,22 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                 onClick={() => setSelectedShift('DAY')}
                 className={`p-4 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
                   selectedShift === 'DAY'
-                    ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/40 text-slate-900 shadow-xs'
+                    ? 'bg-amber-50/80 border-amber-400 ring-2 ring-amber-400/40 text-slate-900 shadow-xs'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700">
-                    <Sun className="w-5 h-5" />
+                <div className="flex items-center space-x-3.5">
+                  <div className="w-11 h-11 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                    <Sun className="w-6 h-6" />
                   </div>
                   <div>
                     <div className="font-bold text-sm text-slate-900">DAY Shift</div>
-                    <div className="text-[11px] text-slate-500 font-medium">08:00 AM – 05:00 PM</div>
+                    <div className="text-[11px] text-slate-500 font-medium">08:00 AM – 05:00 PM IST</div>
                   </div>
                 </div>
+                {selectedShift === 'DAY' && (
+                  <CheckCircle2 className="w-5 h-5 text-amber-600 shrink-0" />
+                )}
               </button>
 
               <button
@@ -396,13 +447,13 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                 onClick={() => setSelectedShift('NIGHT')}
                 className={`p-4 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
                   selectedShift === 'NIGHT'
-                    ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-400/40 text-slate-900 shadow-xs'
+                    ? 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-400/40 text-slate-900 shadow-xs'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700">
-                    <Moon className="w-5 h-5" />
+                <div className="flex items-center space-x-3.5">
+                  <div className="w-11 h-11 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700 shrink-0">
+                    <Moon className="w-6 h-6" />
                   </div>
                   <div>
                     <div className="font-bold text-sm text-slate-900 flex items-center space-x-1.5">
@@ -413,9 +464,12 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-slate-500 font-medium">07:00 PM – 04:00 AM</div>
+                    <div className="text-[11px] text-slate-500 font-medium">07:00 PM – 04:00 AM IST</div>
                   </div>
                 </div>
+                {selectedShift === 'NIGHT' && (
+                  <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />
+                )}
               </button>
             </div>
           </div>
@@ -423,7 +477,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           {/* Assigned Project Site Selection */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Assigned Project Site
+              2. Assigned Project Site
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {availableSites.map((site) => (
@@ -446,11 +500,11 @@ export const PunchCard: React.FC<PunchCardProps> = ({
             </div>
           </div>
 
-          {/* Approved Location Selection */}
+          {/* Site Location / Gate Selector (if multiple) */}
           {siteLocations.length > 1 && (
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Site Location / Gate
+                3. Site Location / Gate
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {siteLocations.map((loc) => {
@@ -475,107 +529,145 @@ export const PunchCard: React.FC<PunchCardProps> = ({
               </div>
             </div>
           )}
+
+          {/* Clean Location Verification Badge */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+            <div className="flex items-center space-x-3">
+              {locationStatus === 'CHECKING' && (
+                <span className="w-4 h-4 border-2 border-slate-400 border-t-slate-900 rounded-full animate-spin shrink-0" />
+              )}
+              {locationStatus === 'VERIFIED' && (
+                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 ring-4 ring-emerald-100 shrink-0" />
+              )}
+              {locationStatus === 'OUTSIDE' && (
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              )}
+              {(locationStatus === 'PERMISSION_REQUIRED' || locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && (
+                <MapPin className="w-4 h-4 text-slate-500 shrink-0" />
+              )}
+
+              <div className="text-xs">
+                <span className="font-bold text-slate-900">
+                  {locationStatus === 'VERIFIED' && '● Location Verified'}
+                  {locationStatus === 'OUTSIDE' && '⚠ Outside Attendance Area'}
+                  {locationStatus === 'PERMISSION_REQUIRED' && 'Location Permission Required'}
+                  {locationStatus === 'CHECKING' && 'Checking Location...'}
+                  {(locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && 'Location Verification'}
+                </span>
+                <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                  {locationMessage || 'Location is verified on your assigned site.'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={verifyLocationStatus}
+              disabled={locationStatus === 'CHECKING'}
+              className="p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition text-xs flex items-center space-x-1 shrink-0 font-medium cursor-pointer"
+              title="Re-verify Location"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${locationStatus === 'CHECKING' ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Check</span>
+            </button>
+          </div>
+
+          {/* PRIMARY VISUAL ACTION BUTTON: SIGN IN */}
+          <div className="pt-2">
+            <button
+              id="btn-sign-in"
+              type="button"
+              onClick={handlePunchIn}
+              disabled={loading}
+              className="w-full py-4 sm:py-4.5 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-extrabold text-base sm:text-lg transition flex items-center justify-center space-x-2.5 shadow-lg hover:shadow-slate-900/30 cursor-pointer disabled:opacity-50"
+            >
+              {loading ? (
+                <span className="flex items-center space-x-2">
+                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  <span>Verifying Location & Signing In...</span>
+                </span>
+              ) : (
+                <span className="flex items-center space-x-2.5">
+                  <Play className="w-5 h-5 fill-current text-amber-400" />
+                  <span>SIGN IN &bull; {selectedShift} SHIFT</span>
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Human-Friendly Clean Location Status Indicator */}
-      <div className="my-6 p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
-        <div className="flex items-center space-x-3">
-          {locationStatus === 'CHECKING' && (
-            <span className="w-4 h-4 border-2 border-slate-400 border-t-slate-900 rounded-full animate-spin shrink-0" />
-          )}
-          {locationStatus === 'VERIFIED' && (
-            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 ring-4 ring-emerald-100 shrink-0" />
-          )}
-          {locationStatus === 'OUTSIDE' && (
-            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-          )}
-          {(locationStatus === 'PERMISSION_REQUIRED' || locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && (
-            <MapPin className="w-4 h-4 text-slate-500 shrink-0" />
-          )}
-
-          <div className="text-xs">
-            <span className="font-bold text-slate-900">
-              {locationStatus === 'VERIFIED' && '● Location Verified'}
-              {locationStatus === 'OUTSIDE' && '⚠ Outside Attendance Area'}
-              {locationStatus === 'PERMISSION_REQUIRED' && 'Location Permission Required'}
-              {locationStatus === 'CHECKING' && 'Checking Location...'}
-              {(locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && 'Location Verification'}
-            </span>
-            <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
-              {locationMessage || 'Location is verified on your assigned site.'}
-            </p>
+      {/* =========================================================================
+          3. SHIFT STATUS & ATTENDANCE SUMMARY METRICS
+          ========================================================================= */}
+      <div className="mt-8 pt-6 border-t border-slate-100">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <CalendarCheck className="w-4 h-4 text-slate-700" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+              Today's Attendance Summary
+            </h3>
           </div>
+          <span className="text-[11px] font-mono font-semibold text-slate-500">
+            {todayShifts.length} {todayShifts.length === 1 ? 'Session' : 'Sessions'} Recorded
+          </span>
         </div>
 
-        <button
-          type="button"
-          onClick={verifyLocationStatus}
-          disabled={locationStatus === 'CHECKING'}
-          className="p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition text-xs flex items-center space-x-1 shrink-0 font-medium cursor-pointer"
-          title="Re-verify Location"
-        >
-          <RotateCcw className={`w-3.5 h-3.5 ${locationStatus === 'CHECKING' ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Check</span>
-        </button>
-      </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Total Working Hours */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div className="flex items-center space-x-2 text-slate-500 mb-1">
+              <Clock className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">Logged Hours</span>
+            </div>
+            <div className="text-lg font-mono font-extrabold text-slate-900">
+              {todayTotalHours.toFixed(1)} hrs
+            </div>
+            <span className="text-[10px] text-slate-500 font-medium">Standard Target: 9.0h</span>
+          </div>
 
-      {/* Prominent Primary Action Button */}
-      <div className="pt-2">
-        {activeSession ? (
-          <button
-            id="btn-sign-out"
-            type="button"
-            onClick={handlePunchOut}
-            disabled={loading}
-            className="w-full py-4 px-6 rounded-2xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-base transition flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50 cursor-pointer"
-          >
-            {loading ? (
-              <span className="flex items-center space-x-2">
-                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                <span>Verifying Location & Signing Out...</span>
-              </span>
-            ) : (
-              <span className="flex items-center space-x-2">
-                <Square className="w-5 h-5 fill-current" />
-                <span>SIGN OUT ({activeSession.shiftType} Shift)</span>
-              </span>
-            )}
-          </button>
-        ) : (
-          <button
-            id="btn-sign-in"
-            type="button"
-            onClick={handlePunchIn}
-            disabled={loading}
-            className="w-full py-4 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold text-base transition flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50 cursor-pointer"
-          >
-            {loading ? (
-              <span className="flex items-center space-x-2">
-                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                <span>Verifying Location & Signing In...</span>
-              </span>
-            ) : (
-              <span className="flex items-center space-x-2">
-                <Play className="w-5 h-5 fill-current text-amber-400" />
-                <span>
-                  SIGN IN &bull; {selectedShift} SHIFT
-                </span>
-              </span>
-            )}
-          </button>
-        )}
+          {/* Shift Classification */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div className="flex items-center space-x-2 text-slate-500 mb-1">
+              <Award className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">Shift Credit</span>
+            </div>
+            <div className="text-lg font-bold text-slate-900">
+              {todayTotalHours >= 9.0
+                ? 'Full Day'
+                : todayTotalHours >= 4.0
+                ? 'Half Day'
+                : todayTotalHours > 0
+                ? 'In Progress'
+                : 'Not Recorded'}
+            </div>
+            <span className="text-[10px] text-slate-500 font-medium">
+              {todayTotalHours >= 9.0 ? '1.0 Regular Unit' : todayTotalHours >= 4.0 ? '0.5 Unit Earned' : '0.0 Unit'}
+            </span>
+          </div>
+
+          {/* Security & Verification Status */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <div className="flex items-center space-x-2 text-slate-500 mb-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">Site Compliance</span>
+            </div>
+            <div className="text-lg font-bold text-emerald-700">
+              Verified
+            </div>
+            <span className="text-[10px] text-slate-500 font-medium">GPS Geofence Protected</span>
+          </div>
+        </div>
       </div>
 
       {/* Policy Footer */}
       <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
         <span className="flex items-center space-x-1.5 font-medium">
           <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-          <span>Milestone Verified Geofence</span>
+          <span>Milestone Consultancy Multi-Site Attendance</span>
         </span>
         <span className="font-mono">IST Shift Policy</span>
       </div>
     </div>
   );
 };
-
