@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Production Security Baseline:
+    // Deny all direct client read and write operations.
+    // All attendance recording, spatial validation, employee onboarding,
+    // and policy enforcement are executed exclusively via server-authoritative
+    // Firebase Admin SDK pipelines.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
