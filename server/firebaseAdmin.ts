@@ -3,6 +3,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
 
 const defaultProjectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'milestone-attendance';
+const targetDatabaseId = process.env.FIREBASE_DATABASE_ID || 'default';
 
 interface AdminDiagnostics {
   serviceAccountEnvExists: boolean;
@@ -10,6 +11,7 @@ interface AdminDiagnostics {
   parseStatus: 'SUCCESS' | 'FAILED' | 'NOT_PROVIDED';
   parseErrorMessage: string | null;
   detectedProjectId: string;
+  selectedDatabaseId: string;
   hasPrivateKey: boolean;
   hasClientEmail: boolean;
   initMode: 'SERVICE_ACCOUNT' | 'APPLICATION_DEFAULT' | 'PROJECT_ONLY';
@@ -22,6 +24,7 @@ const diagnostics: AdminDiagnostics = {
   parseStatus: 'NOT_PROVIDED',
   parseErrorMessage: null,
   detectedProjectId: defaultProjectId,
+  selectedDatabaseId: targetDatabaseId,
   hasPrivateKey: false,
   hasClientEmail: false,
   initMode: 'PROJECT_ONLY',
@@ -115,10 +118,11 @@ if (!getApps().length) {
   appInstance = getApp();
 }
 
-export const adminDb = getFirestore(appInstance);
+export const adminDb = getFirestore(appInstance, targetDatabaseId);
 try {
   adminDb.settings({ ignoreUndefinedProperties: true });
 } catch {}
+console.log(`[Firebase Admin] Firestore client configured for project: ${diagnostics.detectedProjectId}, database: ${targetDatabaseId}`);
 
 export const adminAuth = getAuth(appInstance);
 

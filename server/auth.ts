@@ -61,6 +61,7 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
       parseStatus: adminDiag.parseStatus,
       parseErrorMessage: adminDiag.parseErrorMessage,
       detectedProjectId: adminDiag.detectedProjectId,
+      selectedDatabaseId: adminDiag.selectedDatabaseId,
       initMode: adminDiag.initMode,
       initErrorMessage: adminDiag.initErrorMessage,
       hasPrivateKey: adminDiag.hasPrivateKey,
