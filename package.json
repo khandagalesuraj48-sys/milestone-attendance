@@ -40,5 +40,8 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "@types/express": "^4.17.21"
+  },
+  "overrides": {
+    "ansi-regex": "6.2.2"
   }
 }
