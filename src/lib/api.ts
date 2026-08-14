@@ -296,12 +296,32 @@ export const api = {
   },
 
   // Admin Endpoints
-  async getAdminOverview(): Promise<{
+  async getAdminOverview(params?: {
+    date?: string;
+    siteId?: string;
+    locationId?: string;
+    department?: string;
+  }): Promise<{
     success: boolean;
     todayDate: string;
     summary: Record<string, number>;
+    siteBreakdowns?: any[];
+    todayRecords?: AttendanceRecord[];
+    allEmployees?: Employee[];
+    allSites?: Site[];
+    allLocations?: LocationSite[];
   }> {
-    return request('/api/v1/admin/overview');
+    const query = new URLSearchParams();
+    if (params?.date) query.set('date', params.date);
+    if (params?.siteId && params.siteId !== 'ALL') query.set('siteId', params.siteId);
+    if (params?.locationId && params.locationId !== 'ALL') query.set('locationId', params.locationId);
+    if (params?.department && params.department !== 'ALL') query.set('department', params.department);
+    const qs = query.toString();
+    return request(qs ? `/api/v1/admin/overview?${qs}` : '/api/v1/admin/overview');
+  },
+
+  async getEmployee(id: string): Promise<{ success: boolean; employee: Employee }> {
+    return request(`/api/v1/admin/employees/${id}`);
   },
 
   async getAdminSites(): Promise<{ success: boolean; sites: (Site & { locationsCount: number; assignedEmployeesCount: number })[] }> {

@@ -22,39 +22,158 @@ adminRouter.use(requireAuth);
 adminRouter.use(requirePasswordUpdated);
 adminRouter.use(requireRole(['admin']));
 
-// GET /api/v1/admin/overview - Executive summary
+// GET /api/v1/admin/overview - Executive summary with multi-site breakdowns and filters
 adminRouter.get('/overview', async (req: AuthenticatedRequest, res: Response) => {
   const ist = shiftService.getISTDateParts();
-  const todayDate = ist.dateStr;
+  const { date, siteId, locationId, department } = req.query;
+  const targetDate = date ? String(date) : ist.dateStr;
 
   try {
     const allEmployees = await employeesRepository.getAll();
-    const activeEmployees = allEmployees.filter((e) => e.accountStatus === 'ACTIVE');
-    const todayRecords = await attendanceRepository.queryRecords({ date: todayDate });
     const allSites = await sitesRepository.getAll();
     const allLocations = await locationsRepository.getAll();
+    const allUsers = await usersRepository.getAll();
+    const allRecords = await attendanceRepository.queryRecords({ date: targetDate });
 
-    const currentlyOnDuty = todayRecords.filter((r) => r.sessionStatus === 'OPEN').length;
-    const completedToday = todayRecords.filter((r) => r.sessionStatus === 'CLOSED').length;
-    const lateArrivals = todayRecords.filter((r) => r.isLate).length;
-    const extraNightShifts = todayRecords.filter((r) => r.isExtraShift).length;
-    const autoSignedOutToday = todayRecords.filter(
+    // Filter employees based on active filters
+    let filteredEmployees = allEmployees;
+    if (department && department !== 'ALL') {
+      filteredEmployees = filteredEmployees.filter((e) => e.department === department);
+    }
+    if (siteId && siteId !== 'ALL') {
+      filteredEmployees = filteredEmployees.filter((e) => (e.assignedSiteIds || []).includes(String(siteId)));
+    }
+    if (locationId && locationId !== 'ALL') {
+      filteredEmployees = filteredEmployees.filter(
+        (e) => !e.assignedLocationIds || e.assignedLocationIds.length === 0 || e.assignedLocationIds.includes(String(locationId))
+      );
+    }
+
+    // Filter attendance records based on active filters
+    let filteredRecords = allRecords;
+    if (siteId && siteId !== 'ALL') {
+      filteredRecords = filteredRecords.filter((r) => r.siteId === siteId);
+    }
+    if (locationId && locationId !== 'ALL') {
+      filteredRecords = filteredRecords.filter((r) => r.locationId === locationId);
+    }
+    if (department && department !== 'ALL') {
+      filteredRecords = filteredRecords.filter((r) => {
+        const emp = allEmployees.find((e) => e.employeeId === r.employeeId);
+        return emp?.department === department || r.department === department;
+      });
+    }
+
+    const activeEmployees = filteredEmployees.filter((e) => e.accountStatus === 'ACTIVE');
+    const currentlyOnDuty = filteredRecords.filter(
+      (r) => r.sessionStatus === 'OPEN' || r.attendanceState === 'SIGNED_IN'
+    ).length;
+    const completedToday = filteredRecords.filter(
+      (r) => r.sessionStatus === 'CLOSED' || r.attendanceState === 'SIGNED_OUT'
+    ).length;
+    const lateArrivals = filteredRecords.filter((r) => r.isLate).length;
+    const extraNightShifts = filteredRecords.filter((r) => r.isExtraShift).length;
+    const autoSignedOutToday = filteredRecords.filter(
       (r) => r.signOutReason === 'EMPLOYEE_FORGOT_SIGN_OUT' || r.attendanceState === 'AUTO_SIGNED_OUT'
     ).length;
 
+    // Project / Site Breakdowns
+    const siteBreakdowns = allSites.map((site) => {
+      const siteEmps = allEmployees.filter((e) => (e.assignedSiteIds || []).includes(site.siteId));
+      const activeSiteEmps = siteEmps.filter((e) => e.accountStatus === 'ACTIVE');
+      const siteRecords = allRecords.filter((r) => r.siteId === site.siteId);
+      const siteWorking = siteRecords.filter(
+        (r) => r.sessionStatus === 'OPEN' || r.attendanceState === 'SIGNED_IN'
+      ).length;
+      const siteLate = siteRecords.filter((r) => r.isLate).length;
+      const siteExtra = siteRecords.filter((r) => r.isExtraShift).length;
+      const siteAuto = siteRecords.filter(
+        (r) => r.signOutReason === 'EMPLOYEE_FORGOT_SIGN_OUT' || r.attendanceState === 'AUTO_SIGNED_OUT'
+      ).length;
+
+      const locsForSite = allLocations.filter((l) => l.siteId === site.siteId);
+      const locBreakdowns = locsForSite.map((loc) => {
+        const locId = loc.locationId || loc.id;
+        const locRecords = siteRecords.filter((r) => r.locationId === locId);
+        const locWorking = locRecords.filter(
+          (r) => r.sessionStatus === 'OPEN' || r.attendanceState === 'SIGNED_IN'
+        ).length;
+        const locLate = locRecords.filter((r) => r.isLate).length;
+        const locExtra = locRecords.filter((r) => r.isExtraShift).length;
+        const locAuto = locRecords.filter(
+          (r) => r.signOutReason === 'EMPLOYEE_FORGOT_SIGN_OUT' || r.attendanceState === 'AUTO_SIGNED_OUT'
+        ).length;
+
+        return {
+          locationId: locId,
+          locationName: loc.locationName || loc.name,
+          address: loc.address || '',
+          radiusMeters: loc.radiusMeters || 200,
+          accuracyThresholdMeters: loc.accuracyThresholdMeters || 100,
+          isActive: loc.isActive !== false,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          presentToday: locRecords.length,
+          workingNow: locWorking,
+          lateMarks: locLate,
+          extraNights: locExtra,
+          autoSignedOut: locAuto,
+        };
+      });
+
+      return {
+        siteId: site.siteId,
+        siteName: site.siteName,
+        isActive: site.isActive !== false,
+        totalStaff: siteEmps.length,
+        activeStaff: activeSiteEmps.length,
+        presentToday: siteRecords.length,
+        workingNow: siteWorking,
+        lateMarks: siteLate,
+        extraNights: siteExtra,
+        autoSignedOut: siteAuto,
+        locations: locBreakdowns,
+      };
+    });
+
     const summary = {
-      totalEmployees: allEmployees.length,
+      totalEmployees: filteredEmployees.length,
+      totalStaff: filteredEmployees.length,
       activeHeadcount: activeEmployees.length,
+      activeStaff: activeEmployees.length,
+      presentToday: filteredRecords.length,
+      presentStaff: filteredRecords.length,
       currentlyOnDuty,
+      workingNow: currentlyOnDuty,
       completedToday,
+      signedOut: completedToday,
+      absentStaff: Math.max(0, activeEmployees.length - filteredRecords.length),
       lateArrivals,
+      lateCount: lateArrivals,
       extraNightShifts,
+      extraNightCount: extraNightShifts,
       autoSignedOutToday,
+      autoSignedOut: autoSignedOutToday,
       totalSites: allSites.length,
       totalLocations: allLocations.length,
     };
 
-    return res.json({ success: true, todayDate, summary });
+    return res.json({
+      success: true,
+      todayDate: targetDate,
+      summary,
+      siteBreakdowns,
+      todayRecords: filteredRecords,
+      allEmployees: filteredEmployees.map((emp) => {
+        const u = allUsers.find((user) => user.employeeId === emp.employeeId);
+        return {
+          ...emp,
+          mustChangePassword: u?.mustChangePassword || false,
+        };
+      }),
+      allSites,
+      allLocations,
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -475,44 +594,187 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
   }
 });
 
-// PUT /api/v1/admin/employees/:id - Update Employee & Multi-Site assignments
-adminRouter.put('/employees/:id', async (req: AuthenticatedRequest, res: Response) => {
+// GET /api/v1/admin/employees/:id - Retrieve single employee details
+adminRouter.get('/employees/:id', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const cleanId = id.toUpperCase().trim();
 
   try {
     const employee = await employeesRepository.getById(cleanId);
-    if (!employee) return res.status(404).json({ success: false, error: 'EMPLOYEE_NOT_FOUND' });
+    if (!employee) return res.status(404).json({ success: false, error: 'EMPLOYEE_NOT_FOUND', message: 'Employee not found.' });
 
-    const { fullName, mobile, email, department, designation, assignedSiteIds, accountStatus } = req.body;
-    const updates: Partial<Employee> = {};
+    const user = await usersRepository.getByEmployeeId(cleanId);
+    return res.json({
+      success: true,
+      employee: {
+        ...employee,
+        mustChangePassword: user?.mustChangePassword || false,
+        username: user?.username || employee.username,
+        email: user?.email || employee.email,
+        role: user?.role || 'employee',
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-    if (fullName) updates.fullName = String(fullName).trim();
-    if (mobile) updates.mobile = String(mobile).trim();
-    if (email) updates.email = String(email).trim().toLowerCase();
-    if (department) updates.department = String(department).trim();
-    if (designation) updates.designation = String(designation).trim();
-    if (Array.isArray(assignedSiteIds)) updates.assignedSiteIds = assignedSiteIds;
-    if (accountStatus && ['ACTIVE', 'SUSPENDED', 'INACTIVE'].includes(accountStatus)) {
-      updates.accountStatus = accountStatus;
-      const user = await usersRepository.getByEmployeeId(cleanId);
-      if (user) await usersRepository.update(user.uid, { accountStatus });
+// PUT /api/v1/admin/employees/:id - Authoritative Employee Update
+adminRouter.put('/employees/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const cleanId = id.toUpperCase().trim();
+
+  try {
+    const existingEmployee = await employeesRepository.getById(cleanId);
+    if (!existingEmployee) {
+      return res.status(404).json({ success: false, error: 'EMPLOYEE_NOT_FOUND', message: 'Employee record not found.' });
     }
 
-    await employeesRepository.update(cleanId, updates);
+    const existingUser = (await usersRepository.getByEmployeeId(cleanId)) || (existingEmployee.uid ? await usersRepository.getByUid(existingEmployee.uid) : null);
+
+    const {
+      fullName,
+      employeeId: newEmpIdRaw,
+      email,
+      username,
+      mobile,
+      department,
+      designation,
+      assignedSiteIds,
+      assignedLocationIds,
+      assignedProjectSite,
+      accountStatus,
+      joiningDate,
+    } = req.body;
+
+    const newEmpId = newEmpIdRaw ? String(newEmpIdRaw).toUpperCase().trim() : cleanId;
+    const cleanEmail = email ? String(email).toLowerCase().trim() : existingEmployee.email?.toLowerCase().trim();
+    const cleanUsername = username ? String(username).toLowerCase().trim() : existingEmployee.username?.toLowerCase().trim();
+    const cleanFullName = fullName ? String(fullName).trim() : existingEmployee.fullName;
+
+    // Check if Employee ID changed and verify uniqueness
+    if (newEmpId !== cleanId) {
+      const duplicateEmp = await employeesRepository.getById(newEmpId);
+      if (duplicateEmp) {
+        return res.status(400).json({
+          success: false,
+          error: 'DUPLICATE_EMPLOYEE_ID',
+          message: `Employee ID "${newEmpId}" is already assigned to another workforce member.`,
+        });
+      }
+    }
+
+    // Check Email uniqueness across users
+    if (cleanEmail && cleanEmail !== existingEmployee.email?.toLowerCase().trim()) {
+      const duplicateUser = await usersRepository.getByEmail(cleanEmail);
+      if (duplicateUser && duplicateUser.employeeId !== cleanId && duplicateUser.uid !== existingUser?.uid) {
+        return res.status(400).json({
+          success: false,
+          error: 'DUPLICATE_EMAIL',
+          message: `Email address "${cleanEmail}" is already registered.`,
+        });
+      }
+    }
+
+    // Check Username uniqueness across users
+    if (cleanUsername && cleanUsername !== existingEmployee.username?.toLowerCase().trim()) {
+      const duplicateUsername = await usersRepository.getByUsername(cleanUsername);
+      if (duplicateUsername && duplicateUsername.employeeId !== cleanId && duplicateUsername.uid !== existingUser?.uid) {
+        return res.status(400).json({
+          success: false,
+          error: 'DUPLICATE_USERNAME',
+          message: `Username "${cleanUsername}" is already taken.`,
+        });
+      }
+    }
+
+    // Update Firebase Auth if email or displayName changed
+    if (existingUser?.uid) {
+      const authUpdates: { email?: string; displayName?: string } = {};
+      if (cleanEmail && cleanEmail !== existingUser.email) {
+        authUpdates.email = cleanEmail;
+      }
+      if (cleanFullName && cleanFullName !== existingUser.fullName) {
+        authUpdates.displayName = cleanFullName;
+      }
+
+      if (Object.keys(authUpdates).length > 0) {
+        try {
+          await adminAuth.updateUser(existingUser.uid, authUpdates);
+        } catch (authErr: any) {
+          console.error('Failed to sync updates to Firebase Auth user:', authErr);
+        }
+      }
+
+      // Update Firestore users document
+      await usersRepository.update(existingUser.uid, {
+        fullName: cleanFullName,
+        email: cleanEmail || existingUser.email,
+        username: cleanUsername || existingUser.username,
+        employeeId: newEmpId,
+        accountStatus: accountStatus || existingUser.accountStatus || 'ACTIVE',
+      });
+    }
+
+    // Prepare updated employee payload
+    const updatedEmployeeData: Employee = {
+      ...existingEmployee,
+      employeeId: newEmpId,
+      fullName: cleanFullName,
+      email: cleanEmail || existingEmployee.email || '',
+      username: cleanUsername || existingEmployee.username || '',
+      mobile: mobile !== undefined ? String(mobile).trim() : existingEmployee.mobile,
+      department: department !== undefined ? String(department).trim() : existingEmployee.department,
+      designation: designation !== undefined ? String(designation).trim() : existingEmployee.designation,
+      assignedSiteIds: Array.isArray(assignedSiteIds) ? assignedSiteIds : existingEmployee.assignedSiteIds || [],
+      assignedLocationIds: Array.isArray(assignedLocationIds) ? assignedLocationIds : existingEmployee.assignedLocationIds,
+      assignedProjectSite: assignedProjectSite !== undefined ? String(assignedProjectSite).trim() : existingEmployee.assignedProjectSite,
+      accountStatus: accountStatus && ['ACTIVE', 'SUSPENDED', 'INACTIVE'].includes(accountStatus) ? accountStatus : existingEmployee.accountStatus || 'ACTIVE',
+      joiningDate: joiningDate || existingEmployee.joiningDate || new Date().toISOString().split('T')[0],
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (newEmpId !== cleanId) {
+      // Save new document and delete old document to maintain clean ID primary key
+      await employeesRepository.create(updatedEmployeeData);
+      await employeesRepository.delete(cleanId);
+    } else {
+      await employeesRepository.update(cleanId, updatedEmployeeData);
+    }
+
+    // Write comprehensive immutable audit log
     await auditRepository.log({
       actorId: req.user!.employeeId,
       actorName: req.user!.fullName,
       actorRole: 'admin',
       action: 'EMPLOYEE_UPDATED',
-      targetId: cleanId,
-      details: updates,
+      targetId: newEmpId,
+      details: {
+        previousEmployeeId: cleanId,
+        newEmployeeId: newEmpId,
+        updatedFields: {
+          fullName: cleanFullName,
+          email: cleanEmail,
+          username: cleanUsername,
+          mobile: updatedEmployeeData.mobile,
+          department: updatedEmployeeData.department,
+          designation: updatedEmployeeData.designation,
+          assignedSiteIds: updatedEmployeeData.assignedSiteIds,
+          assignedLocationIds: updatedEmployeeData.assignedLocationIds,
+          accountStatus: updatedEmployeeData.accountStatus,
+        },
+      },
       ipAddress: req.ip || '127.0.0.1',
     });
 
-    return res.json({ success: true, employee: { ...employee, ...updates } });
+    return res.json({
+      success: true,
+      message: `Employee profile for ${cleanFullName} (${newEmpId}) updated successfully.`,
+      employee: updatedEmployeeData,
+    });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    console.error('Error updating employee:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Failed to update employee record.' });
   }
 });
 

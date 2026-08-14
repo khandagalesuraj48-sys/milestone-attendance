@@ -70,28 +70,54 @@ export const attendanceService = {
       throw new Error(`Project site ${siteId} is currently inactive or not found.`);
     }
 
-    // STEP 4: Validate Approved Location under the Site
-    const location = await locationsRepository.getById(locationId);
-    if (!location || !location.isActive) {
-      throw new Error(`Location ${locationId} is inactive or not found.`);
-    }
-    if (location.siteId && location.siteId !== siteId) {
-      throw new Error(`Location ${location.locationName} belongs to site ${location.siteId}, not ${siteId}.`);
+    // STEP 4: Retrieve all active locations under this site (and filter by assignedLocationIds if configured)
+    const siteLocations = await locationsRepository.getBySiteId(siteId);
+    let activeLocations = siteLocations.filter((l) => l.isActive !== false);
+
+    if (employee.assignedLocationIds && employee.assignedLocationIds.length > 0) {
+      const allowedLocs = activeLocations.filter((l) =>
+        employee.assignedLocationIds!.includes(l.locationId || l.id || '')
+      );
+      if (allowedLocs.length > 0) {
+        activeLocations = allowedLocs;
+      }
     }
 
-    // STEP 5 & 6: Validate GPS Accuracy and Haversine Geofence
-    const geoCheck = geoService.validateLocationGeofence(
-      latitude,
-      longitude,
-      accuracy,
-      location.latitude,
-      location.longitude,
-      location.radiusMeters,
-      location.accuracyThresholdMeters || 100
-    );
-    if (!geoCheck.accuracyPassed || !geoCheck.isWithinGeofence) {
-      throw new Error(geoCheck.errorMessage || 'Geofence validation failed.');
+    if (activeLocations.length === 0) {
+      throw new Error(`No active attendance locations configured for project site ${site.siteName}.`);
     }
+
+    // STEP 5 & 6: Validate GPS Accuracy and Haversine Geofence against ANY active location under the site
+    interface MatchCandidate {
+      location: typeof activeLocations[0];
+      geoCheck: ReturnType<typeof geoService.validateLocationGeofence>;
+    }
+
+    const matches: MatchCandidate[] = [];
+    for (const loc of activeLocations) {
+      const check = geoService.validateLocationGeofence(
+        latitude,
+        longitude,
+        accuracy,
+        loc.latitude,
+        loc.longitude,
+        loc.radiusMeters || 200,
+        loc.accuracyThresholdMeters || 100
+      );
+      if (check.accuracyPassed && check.isWithinGeofence) {
+        matches.push({ location: loc, geoCheck: check });
+      }
+    }
+
+    if (matches.length === 0) {
+      throw new Error(
+        `OUTSIDE ATTENDANCE AREA: You are outside all authorized attendance locations for ${site.siteName}. Please move inside an approved project location to record attendance.`
+      );
+    }
+
+    // Pick closest matching location
+    matches.sort((a, b) => a.geoCheck.distanceMeters - b.geoCheck.distanceMeters);
+    const { location, geoCheck } = matches[0];
 
     // STEP 7: Validate Shift Type
     if (shiftType !== 'DAY' && shiftType !== 'NIGHT') {
@@ -215,21 +241,31 @@ export const attendanceService = {
       throw new Error('No active open session found to sign out from.');
     }
 
-    // Geofence Validation on Sign Out
-    if (activeSession.locationId) {
-      const location = await locationsRepository.getById(activeSession.locationId);
-      if (location && location.isActive) {
-        const geoCheck = geoService.validateLocationGeofence(
-          latitude,
-          longitude,
-          accuracy || 10,
-          location.latitude,
-          location.longitude,
-          location.radiusMeters,
-          location.accuracyThresholdMeters || 100
-        );
-        if (!geoCheck.accuracyPassed || !geoCheck.isWithinGeofence) {
-          throw new Error(geoCheck.errorMessage || 'Outside Attendance Area. You must be within your assigned site to sign out.');
+    // Geofence Validation on Sign Out (must be within any active location of the assigned site)
+    if (activeSession.siteId) {
+      const siteLocations = await locationsRepository.getBySiteId(activeSession.siteId);
+      const activeLocs = siteLocations.filter((l) => l.isActive !== false);
+      if (activeLocs.length > 0) {
+        let isInsideAny = false;
+        for (const loc of activeLocs) {
+          const geoCheck = geoService.validateLocationGeofence(
+            latitude,
+            longitude,
+            accuracy || 10,
+            loc.latitude,
+            loc.longitude,
+            loc.radiusMeters || 200,
+            loc.accuracyThresholdMeters || 100
+          );
+          if (geoCheck.accuracyPassed && geoCheck.isWithinGeofence) {
+            isInsideAny = true;
+            break;
+          }
+        }
+        if (!isInsideAny) {
+          throw new Error(
+            `OUTSIDE ATTENDANCE AREA: You must be physically within an authorized location of your project site (${activeSession.siteNameSnapshot}) to sign out.`
+          );
         }
       }
     }

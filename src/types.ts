@@ -69,6 +69,7 @@ export type LocationSite = Location & {
 
 export interface Employee {
   id?: string;
+  uid?: string;
   employeeId: string;
   username: string;
   fullName: string;

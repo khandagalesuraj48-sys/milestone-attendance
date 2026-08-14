@@ -1,7 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { LocationSite, Site } from '../../types';
 import { api } from '../../lib/api';
-import { MapPin, Plus, CheckCircle, ShieldCheck, Edit2, X, Building2, Layers, AlertCircle } from 'lucide-react';
+import {
+  MapPin,
+  Plus,
+  CheckCircle,
+  ShieldCheck,
+  Edit2,
+  X,
+  Building2,
+  Layers,
+  AlertCircle,
+  Users,
+  Eye,
+  Navigation,
+  CheckCircle2,
+} from 'lucide-react';
 
 interface SiteManagerProps {
   locations: LocationSite[];
@@ -13,6 +27,7 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
   const [loading, setLoading] = useState(false);
   const [showAddSiteModal, setShowAddSiteModal] = useState(false);
   const [showAddLocationModal, setShowAddLocationModal] = useState(false);
+  const [selectedSiteForDrilldown, setSelectedSiteForDrilldown] = useState<any>(null);
 
   // New Site Form State
   const [newSiteId, setNewSiteId] = useState('');
@@ -102,6 +117,11 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
     }
   };
 
+  const openAddLocationForSite = (siteId: string) => {
+    setLocSiteId(siteId);
+    setShowAddLocationModal(true);
+  };
+
   return (
     <div id="site-manager" className="space-y-6">
       {/* Notifications */}
@@ -118,12 +138,14 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
         </div>
       )}
 
-      {/* Section 1: Authorized Project Sites */}
+      {/* Section 1: Authorized Project Sites Master */}
       <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xs text-slate-900">
         <div className="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-slate-200">
           <div>
             <h3 className="text-lg font-bold text-slate-900 tracking-tight">Project Sites Master (Multi-Site)</h3>
-            <p className="text-xs text-slate-500">Authorized administrative construction sites and office facilities</p>
+            <p className="text-xs text-slate-500">
+              Authorized administrative project sites. Each site can have multiple geofence locations.
+            </p>
           </div>
 
           <button
@@ -136,29 +158,56 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
         </div>
 
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {sites.map((site) => (
-            <div key={site.siteId} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <div className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700">
-                    <Building2 className="w-4 h-4" />
+          {sites.map((site) => {
+            const siteLocations = locations.filter((loc) => loc.siteId === site.siteId);
+            return (
+              <div
+                key={site.siteId}
+                className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-slate-300 transition space-y-3"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="p-2 rounded-xl bg-white border border-slate-200 text-slate-700">
+                      <Building2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900">{site.siteName}</h4>
+                      <span className="font-mono text-[10px] text-slate-500">{site.siteId}</span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-slate-900">{site.siteName}</h4>
-                    <span className="font-mono text-[10px] text-slate-500">{site.siteId}</span>
-                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                      site.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {site.isActive ? 'Active' : 'Inactive'}
+                  </span>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${site.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
-                  {site.isActive ? 'Active' : 'Inactive'}
-                </span>
-              </div>
 
-              <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-600">
-                <span>{site.locationsCount || 0} Location(s)</span>
-                <span>{site.assignedEmployeesCount || 0} Staff Assigned</span>
+                <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-600">
+                  <span className="font-semibold text-slate-800">{siteLocations.length} Location(s)</span>
+                  <span>{site.assignedEmployeesCount || 0} Staff Assigned</span>
+                </div>
+
+                <div className="pt-2 flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => setSelectedSiteForDrilldown({ ...site, siteLocations })}
+                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 text-xs font-semibold flex items-center justify-center space-x-1 transition"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-slate-500" />
+                    <span>View Perimeters</span>
+                  </button>
+                  <button
+                    onClick={() => openAddLocationForSite(site.siteId)}
+                    className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs transition"
+                    title="Add Location under this Site"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -167,11 +216,16 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
         <div className="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-slate-200">
           <div>
             <h3 className="text-lg font-bold text-slate-900 tracking-tight">Geofence Boundary Perimeters</h3>
-            <p className="text-xs text-slate-500">Physical office & site gates with Server-Authoritative Haversine enforcement</p>
+            <p className="text-xs text-slate-500">
+              Physical office & site gates with Server-Authoritative Haversine validation
+            </p>
           </div>
 
           <button
-            onClick={() => setShowAddLocationModal(true)}
+            onClick={() => {
+              if (sites.length > 0) setLocSiteId(sites[0].siteId);
+              setShowAddLocationModal(true);
+            }}
             className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs flex items-center space-x-1.5 transition shadow-xs"
           >
             <Plus className="w-4 h-4 text-amber-400" />
@@ -192,7 +246,9 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
                     </div>
                     <div>
                       <h4 className="font-bold text-sm text-slate-900">{loc.locationName || loc.name}</h4>
-                      <p className="text-xs text-slate-500">{parentSite ? parentSite.siteName : loc.siteName || 'Project Site'}</p>
+                      <p className="text-xs font-semibold text-slate-600">
+                        {parentSite ? parentSite.siteName : loc.siteName || 'Project Site'}
+                      </p>
                     </div>
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-white text-slate-800 border border-slate-200">
@@ -203,7 +259,9 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
                 <p className="text-xs text-slate-600 truncate">{loc.address || 'Standard site perimeter'}</p>
 
                 <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-xs font-mono text-slate-500">
-                  <span>Lat: {loc.latitude?.toFixed(4)} • Lng: {loc.longitude?.toFixed(4)}</span>
+                  <span>
+                    Lat: {loc.latitude?.toFixed(4)} • Lng: {loc.longitude?.toFixed(4)}
+                  </span>
                   <span className="text-emerald-700 flex items-center space-x-1 font-sans font-semibold">
                     <ShieldCheck className="w-3.5 h-3.5" />
                     <span>Threshold: {loc.accuracyThresholdMeters || 100}m</span>
@@ -214,6 +272,94 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
           })}
         </div>
       </div>
+
+      {/* Site Drilldown Modal */}
+      {selectedSiteForDrilldown && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 text-slate-900">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl relative">
+            <button
+              onClick={() => setSelectedSiteForDrilldown(null)}
+              className="absolute top-5 right-5 p-1 rounded-xl text-slate-400 hover:text-slate-900"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="p-3 bg-slate-900 text-white rounded-2xl">
+                <Building2 className="w-6 h-6 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">{selectedSiteForDrilldown.siteName}</h3>
+                <span className="font-mono text-xs text-slate-500">ID: {selectedSiteForDrilldown.siteId}</span>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs">
+                <div>
+                  <span className="text-slate-500 block">Total Geofences Under Site</span>
+                  <span className="font-bold text-slate-900 text-sm">
+                    {selectedSiteForDrilldown.siteLocations?.length || 0} Registered Gates/Points
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    openAddLocationForSite(selectedSiteForDrilldown.siteId);
+                    setSelectedSiteForDrilldown(null);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs flex items-center space-x-1"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Add Location</span>
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {selectedSiteForDrilldown.siteLocations?.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-slate-400">
+                    No physical geofences configured under this site yet.
+                  </div>
+                ) : (
+                  selectedSiteForDrilldown.siteLocations.map((loc: any) => (
+                    <div
+                      key={loc.locationId || loc.id}
+                      className="p-3.5 bg-white rounded-2xl border border-slate-200 text-xs flex items-start justify-between"
+                    >
+                      <div className="space-y-1">
+                        <div className="font-bold text-slate-900 flex items-center space-x-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span>{loc.locationName || loc.name}</span>
+                        </div>
+                        <p className="text-slate-500 text-[11px]">{loc.address || 'Standard physical perimeter'}</p>
+                        <div className="font-mono text-[10px] text-slate-400">
+                          {loc.latitude?.toFixed(4)}, {loc.longitude?.toFixed(4)}
+                        </div>
+                      </div>
+                      <div className="text-right space-y-1 shrink-0">
+                        <span className="px-2 py-0.5 bg-slate-100 rounded-full font-mono text-[10px] font-bold text-slate-700">
+                          {loc.radiusMeters}m Geofence
+                        </span>
+                        <div className="text-[10px] text-emerald-700 font-semibold">
+                          Max Acc: {loc.accuracyThresholdMeters || 100}m
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setSelectedSiteForDrilldown(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-800 text-xs font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Site Modal */}
       {showAddSiteModal && (
@@ -264,7 +410,7 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
                   disabled={loading}
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition"
                 >
-                  {loading ? 'Creating...' : 'Create Site'}
+                  {loading ? 'Creating...' : 'Create Project Site'}
                 </button>
               </div>
             </form>
@@ -282,9 +428,9 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
             >
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-lg font-bold text-slate-900 mb-4">Add Geofence Boundary Location</h3>
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Add Geofence Location</h3>
 
-            <form onSubmit={handleCreateLocation} className="space-y-3.5 text-xs">
+            <form onSubmit={handleCreateLocation} className="space-y-4 text-xs">
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">Parent Project Site</label>
                 <select
