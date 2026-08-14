@@ -31,50 +31,61 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
     });
   }
 
+  let decodedToken: any;
   try {
     // 1. Authoritative verification against Firebase Admin
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
+    decodedToken = await adminAuth.verifyIdToken(idToken);
     req.token = idToken;
-
-    // 2. Fetch user profile from Firestore strictly using verified Firebase UID
-    const user = await usersRepository.getByUid(decodedToken.uid);
-
-    if (!user) {
-      return res.status(403).json({
-        success: false,
-        error: 'PROFILE_NOT_PROVISIONED',
-        message: 'Your account is authenticated but has not been provisioned in the attendance system. Please contact the administrator.',
-      });
-    }
-
-    // 3. Strict UID Consistency enforcement
-    if (user.uid !== decodedToken.uid) {
-      return res.status(403).json({
-        success: false,
-        error: 'PROFILE_UID_MISMATCH',
-        message: 'Security validation failed: profile UID does not match authenticated identity.',
-      });
-    }
-
-    // 4. Enforce account status
-    if (user.accountStatus && user.accountStatus !== 'ACTIVE') {
-      return res.status(403).json({
-        success: false,
-        error: 'ACCOUNT_SUSPENDED',
-        message: 'Your account has been deactivated or suspended. Please contact HR.',
-      });
-    }
-
-    req.user = user;
-    return next();
   } catch (err: any) {
-    // Token is invalid, expired, or revoked
+    // Token is invalid, expired, revoked, or malformed
     return res.status(401).json({
       success: false,
       error: 'UNAUTHORIZED',
       message: 'Authentication token is invalid or expired. Please sign in again.',
     });
   }
+
+  let user: User | null;
+  try {
+    // 2. Fetch user profile from Firestore strictly using verified Firebase UID
+    user = await usersRepository.getByUid(decodedToken.uid);
+  } catch (err: any) {
+    console.error('[requireAuth] Database error retrieving user profile:', err?.message || 'Unknown database error');
+    return res.status(500).json({
+      success: false,
+      error: 'DATABASE_ERROR',
+      message: 'Failed to retrieve user profile from database',
+    });
+  }
+
+  if (!user) {
+    return res.status(403).json({
+      success: false,
+      error: 'PROFILE_NOT_PROVISIONED',
+      message: 'Your account is authenticated but has not been provisioned in the attendance system. Please contact the administrator.',
+    });
+  }
+
+  // 3. Strict UID Consistency enforcement
+  if (user.uid !== decodedToken.uid) {
+    return res.status(403).json({
+      success: false,
+      error: 'PROFILE_UID_MISMATCH',
+      message: 'Security validation failed: profile UID does not match authenticated identity.',
+    });
+  }
+
+  // 4. Enforce account status
+  if (user.accountStatus && user.accountStatus !== 'ACTIVE') {
+    return res.status(403).json({
+      success: false,
+      error: 'ACCOUNT_SUSPENDED',
+      message: 'Your account has been deactivated or suspended. Please contact HR.',
+    });
+  }
+
+  req.user = user;
+  return next();
 }
 
 /**
