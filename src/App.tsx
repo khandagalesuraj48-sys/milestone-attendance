@@ -13,6 +13,8 @@ import { MonthlyRegister } from './components/EmployeeDashboard/MonthlyRegister'
 import { LeaveRequestCard } from './components/EmployeeDashboard/LeaveRequestCard';
 import { MyProfile } from './components/EmployeeDashboard/MyProfile';
 import { TeamFeedWidget } from './components/EmployeeDashboard/TeamFeedWidget';
+import { EmployeeMenuDrawer } from './components/EmployeeDashboard/EmployeeMenuDrawer';
+import { NotificationDrawer } from './components/EmployeeDashboard/NotificationDrawer';
 
 // Admin Components
 import { OperationsBoard } from './components/AdminDashboard/OperationsBoard';
@@ -49,7 +51,9 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<AttendanceRecord | null>(null);
   const [todayShifts, setTodayShifts] = useState<AttendanceRecord[]>([]);
   const [autoSignOutNotice, setAutoSignOutNotice] = useState<any>(null);
-  const [empActiveTab, setEmpActiveTab] = useState<'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE'>('SHIFT');
+  const [empActiveTab, setEmpActiveTab] = useState<'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS'>('SHIFT');
+  const [isEmployeeMenuOpen, setIsEmployeeMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   // Admin State
   const [adminActiveTab, setAdminActiveTab] = useState<
@@ -212,7 +216,31 @@ export default function App() {
         currentTab={empActiveTab}
         onMobileMenuToggle={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMobileMenuOpen={isMobileMenuOpen}
+        onOpenEmployeeMenu={() => setIsEmployeeMenuOpen(true)}
+        onOpenNotifications={() => setIsNotificationsOpen(true)}
+        notificationsCount={autoSignOutNotice ? 1 : 0}
       />
+
+      {/* Employee Navigation Drawers (Mobile & Desktop) */}
+      {currentUser.role !== 'admin' && (
+        <>
+          <EmployeeMenuDrawer
+            isOpen={isEmployeeMenuOpen}
+            onClose={() => setIsEmployeeMenuOpen(false)}
+            user={currentUser}
+            currentTab={empActiveTab}
+            onSelectTab={(tab) => setEmpActiveTab(tab)}
+            onLogout={handleLogout}
+            siteName="RCL • WALSHIND"
+          />
+          <NotificationDrawer
+            isOpen={isNotificationsOpen}
+            onClose={() => setIsNotificationsOpen(false)}
+            notice={autoSignOutNotice}
+            user={currentUser}
+          />
+        </>
+      )}
 
       {/* Main Layout Container */}
       <div className="flex-1 w-full flex flex-col lg:flex-row">
@@ -366,83 +394,103 @@ export default function App() {
           /* =========================================================================
              EMPLOYEE SELF-SERVICE PORTAL (CLEAN & ELEGANT WORKFORCE EXPERIENCE)
              ========================================================================= */
-          <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 pb-24 md:pb-8">
-            {/* Auto Sign-Out Notification Banner */}
-            <AutoSignOutNotice notice={autoSignOutNotice} />
-
-            {/* Employee Tab Navigation Header (Desktop / Tablet) */}
-            <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-slate-200">
-              <div className="flex items-center space-x-1.5 p-1 bg-white border border-slate-200 rounded-2xl shadow-2xs text-xs font-semibold w-full sm:w-auto">
+          <main className="flex-1 max-w-4xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4">
+            {/* Desktop Quick Tab Navigation Header */}
+            <div className="hidden sm:flex items-center justify-between gap-3 pb-1 border-b border-slate-200">
+              <div className="flex items-center space-x-1 p-1 bg-white border border-slate-200 rounded-2xl shadow-2xs text-xs font-semibold">
                 <button
                   id="tab-emp-shift"
                   onClick={() => setEmpActiveTab('SHIFT')}
-                  className={`flex-1 sm:flex-none px-4 py-2 rounded-xl flex items-center justify-center space-x-2 transition ${
+                  className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'SHIFT'
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  <Clock className="w-4 h-4" />
+                  <Clock className="w-3.5 h-3.5" />
                   <span>Shift & Attendance</span>
                 </button>
 
                 <button
                   id="tab-emp-register"
                   onClick={() => setEmpActiveTab('HISTORY')}
-                  className={`flex-1 sm:flex-none px-4 py-2 rounded-xl flex items-center justify-center space-x-2 transition ${
+                  className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'HISTORY'
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  <Calendar className="w-4 h-4" />
+                  <Calendar className="w-3.5 h-3.5" />
                   <span>Monthly Register</span>
                 </button>
 
                 <button
                   id="tab-emp-leave"
                   onClick={() => setEmpActiveTab('LEAVE')}
-                  className={`flex-1 sm:flex-none px-4 py-2 rounded-xl flex items-center justify-center space-x-2 transition ${
+                  className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'LEAVE'
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  <FileText className="w-4 h-4" />
+                  <FileText className="w-3.5 h-3.5" />
                   <span>Leave Requests</span>
                 </button>
 
                 <button
                   id="tab-emp-profile"
                   onClick={() => setEmpActiveTab('PROFILE')}
-                  className={`flex-1 sm:flex-none px-4 py-2 rounded-xl flex items-center justify-center space-x-2 transition ${
+                  className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'PROFILE'
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  <Users className="w-4 h-4" />
+                  <Users className="w-3.5 h-3.5" />
                   <span>My Profile</span>
                 </button>
               </div>
+
+              {/* Navigation Menu Button */}
+              <button
+                type="button"
+                onClick={() => setIsEmployeeMenuOpen(true)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition flex items-center space-x-1.5 cursor-pointer shadow-2xs"
+              >
+                <span>Menu</span>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </button>
             </div>
+
+            {/* Mobile View Active Tab Banner & Back Shortcut */}
+            {empActiveTab !== 'SHIFT' && (
+              <div className="sm:hidden flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  {empActiveTab === 'HISTORY' && '📅 Monthly Register'}
+                  {empActiveTab === 'LEAVE' && '📄 Leave Requests'}
+                  {empActiveTab === 'PROFILE' && '👤 My Profile'}
+                  {empActiveTab === 'TEAM_HIGHLIGHTS' && '🌟 Team Highlights'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEmpActiveTab('SHIFT')}
+                  className="text-xs font-bold text-amber-600 hover:text-amber-700 flex items-center space-x-1"
+                >
+                  <span>&larr; Back to Shift</span>
+                </button>
+              </div>
+            )}
 
             {/* Employee Tab Content */}
             {empActiveTab === 'SHIFT' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <div className="lg:col-span-7">
-                  <PunchCard
-                    user={currentUser}
-                    activeSession={activeSession}
-                    todayShifts={todayShifts}
-                    onAttendanceUpdate={loadEmployeeData}
-                    locations={locations}
-                  />
-                </div>
-                <div className="lg:col-span-5 space-y-6">
-                  <TodayShiftList shifts={todayShifts} />
-                  <TeamFeedWidget user={currentUser} />
-                </div>
+              <div className="space-y-4">
+                <PunchCard
+                  user={currentUser}
+                  activeSession={activeSession}
+                  todayShifts={todayShifts}
+                  onAttendanceUpdate={loadEmployeeData}
+                  locations={locations}
+                />
               </div>
             )}
 
@@ -454,65 +502,18 @@ export default function App() {
               <MyProfile user={currentUser} onUserUpdated={(u) => setCurrentUser(u)} />
             )}
 
-            {/* Mobile Bottom Tab Bar (App-like Experience for iPhone & Android) */}
-            <div className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 p-2 md:hidden shadow-lg flex items-center justify-around">
-              <button
-                onClick={() => setEmpActiveTab('SHIFT')}
-                className={`flex flex-col items-center py-1 px-3 rounded-xl transition ${
-                  empActiveTab === 'SHIFT' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
-                }`}
-              >
-                <Clock className={`w-5 h-5 ${empActiveTab === 'SHIFT' ? 'text-amber-500' : ''}`} />
-                <span className="text-[10px] mt-0.5">Shift</span>
-              </button>
-
-              <button
-                onClick={() => setEmpActiveTab('HISTORY')}
-                className={`flex flex-col items-center py-1 px-3 rounded-xl transition ${
-                  empActiveTab === 'HISTORY' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
-                }`}
-              >
-                <Calendar className={`w-5 h-5 ${empActiveTab === 'HISTORY' ? 'text-amber-500' : ''}`} />
-                <span className="text-[10px] mt-0.5">Register</span>
-              </button>
-
-              <button
-                onClick={() => setEmpActiveTab('LEAVE')}
-                className={`flex flex-col items-center py-1 px-3 rounded-xl transition ${
-                  empActiveTab === 'LEAVE' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
-                }`}
-              >
-                <FileText className={`w-5 h-5 ${empActiveTab === 'LEAVE' ? 'text-amber-500' : ''}`} />
-                <span className="text-[10px] mt-0.5">Leave</span>
-              </button>
-
-              <button
-                onClick={() => setEmpActiveTab('PROFILE')}
-                className={`flex flex-col items-center py-1 px-3 rounded-xl transition ${
-                  empActiveTab === 'PROFILE' ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'
-                }`}
-              >
-                <Users className={`w-5 h-5 ${empActiveTab === 'PROFILE' ? 'text-amber-500' : ''}`} />
-                <span className="text-[10px] mt-0.5">Profile</span>
-              </button>
-            </div>
+            {empActiveTab === 'TEAM_HIGHLIGHTS' && (
+              <TeamFeedWidget user={currentUser} />
+            )}
           </main>
         )}
       </div>
 
-      {/* Corporate Enterprise Footer */}
-      <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center space-x-2">
-            <span className="font-bold text-slate-800">Milestone Consultancy</span>
-            <span>&bull;</span>
-            <span>Workforce Management Platform</span>
-          </div>
-          <div className="flex items-center space-x-4 text-[11px] font-mono text-slate-400">
-            <span>Server-Authoritative Geofencing</span>
-            <span>&bull;</span>
-            <span>Indian Standard Time (IST)</span>
-          </div>
+      {/* Clean Professional Corporate Footer */}
+      <footer className="bg-white border-t border-slate-200 py-3.5 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-1.5">
+          <div className="font-bold text-slate-800 tracking-tight">Milestone Consultancy</div>
+          <div className="text-[11px] text-slate-400 font-medium">Build by Suraj Khandagale</div>
         </div>
       </footer>
     </div>

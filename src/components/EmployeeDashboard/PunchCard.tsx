@@ -14,8 +14,8 @@ import {
   RotateCcw,
   ShieldCheck,
   Clock,
+  Sparkles,
   CalendarCheck,
-  TrendingUp,
   Award,
 } from 'lucide-react';
 
@@ -32,9 +32,9 @@ type LocationStatusType = 'IDLE' | 'CHECKING' | 'VERIFIED' | 'OUTSIDE' | 'PERMIS
 export const PunchCard: React.FC<PunchCardProps> = ({
   user,
   activeSession,
-  todayShifts,
+  todayShifts = [],
   onAttendanceUpdate,
-  locations,
+  locations = [],
 }) => {
   const [selectedShift, setSelectedShift] = useState<ShiftType>('DAY');
   const [selectedSiteId, setSelectedSiteId] = useState<string>('');
@@ -49,7 +49,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   const [locationStatus, setLocationStatus] = useState<LocationStatusType>('IDLE');
   const [locationMessage, setLocationMessage] = useState<string>('');
 
-  // Calculate dynamic time-of-day greeting
+  // Calculate dynamic time-of-day greeting from IST
   const getGreetingText = () => {
     try {
       const now = new Date();
@@ -63,8 +63,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
       if (hour >= 5 && hour < 12) return `Good Morning, ${name} 👋`;
       if (hour >= 12 && hour < 17) return `Good Afternoon, ${name} 👋`;
-      if (hour >= 17 && hour < 21) return `Good Evening, ${name} 👋`;
-      return `Good Night, ${name} 👋`;
+      return `Good Evening, ${name} 👋`;
     } catch {
       return `Welcome, ${user?.fullName || 'Colleague'} 👋`;
     }
@@ -110,7 +109,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   // Instant Verification of Location status against chosen Site Perimeter
   const verifyLocationStatus = async () => {
     setLocationStatus('CHECKING');
-    setLocationMessage('Checking GPS location...');
+    setLocationMessage('Checking location...');
 
     try {
       const geo = await getCurrentBrowserLocation();
@@ -118,10 +117,10 @@ export const PunchCard: React.FC<PunchCardProps> = ({
       if (geo.error || !geo.coordinates) {
         if (geo.error?.includes('denied')) {
           setLocationStatus('PERMISSION_REQUIRED');
-          setLocationMessage('Location permission required. Please enable browser GPS.');
+          setLocationMessage('Location permission required. Please enable device location.');
         } else {
           setLocationStatus('UNAVAILABLE');
-          setLocationMessage('GPS signal unavailable. Please ensure location services are enabled.');
+          setLocationMessage('Location signal unavailable. Please ensure GPS is enabled.');
         }
         return;
       }
@@ -143,14 +142,14 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
         if (distance <= (targetLoc.radiusMeters || 100)) {
           setLocationStatus('VERIFIED');
-          setLocationMessage(`Location Verified (${targetLoc.locationName || 'Project Site'})`);
+          setLocationMessage('Inside authorized area');
         } else {
           setLocationStatus('OUTSIDE');
-          setLocationMessage('Outside Attendance Area. Please be at your assigned site location.');
+          setLocationMessage('Outside authorized area');
         }
       } else {
         setLocationStatus('VERIFIED');
-        setLocationMessage('Location Ready');
+        setLocationMessage('Inside authorized area');
       }
     } catch {
       setLocationStatus('UNAVAILABLE');
@@ -207,7 +206,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
       // Fetch single live location at point of sign-in
       const geo: LocationResult = await getCurrentBrowserLocation();
       if (geo.error || !geo.coordinates) {
-        throw new Error(geo.error || 'Location access is required to sign in. Please enable GPS location.');
+        throw new Error(geo.error || 'Location access is required to sign in. Please enable device location.');
       }
 
       const res = await api.punchIn({
@@ -237,7 +236,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
       // Fetch single live location at point of sign-out
       const geo: LocationResult = await getCurrentBrowserLocation();
       if (geo.error || !geo.coordinates) {
-        throw new Error(geo.error || 'Location access is required to sign out. Please enable GPS location.');
+        throw new Error(geo.error || 'Location access is required to sign out. Please enable device location.');
       }
 
       const res = await api.punchOut({
@@ -256,10 +255,22 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   };
 
   const selectedSite = availableSites.find((s) => s.siteId === selectedSiteId);
+  const selectedLoc = siteLocations.find((l) => (l.locationId || l.id) === selectedLocationId);
+
+  // Format record time helper
+  const formatTime = (isoString?: string | null) => {
+    if (!isoString) return '--:--';
+    return new Date(isoString).toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
 
   // Calculate today's total hours logged across all closed/open shifts
   const todayTotalHours = (todayShifts || []).reduce((acc, curr) => {
-    if (curr.workingMinutes) return acc + (curr.workingMinutes / 60);
+    if (curr.workingMinutes) return acc + curr.workingMinutes / 60;
     if (curr.sessionStatus === 'OPEN' && curr.signInTime) {
       const diffHrs = Math.max(0, (Date.now() - new Date(curr.signInTime).getTime()) / 3600000);
       return acc + diffHrs;
@@ -267,34 +278,35 @@ export const PunchCard: React.FC<PunchCardProps> = ({
     return acc;
   }, 0);
 
-  // Shift progress percentage toward 9.0 hours standard day
   const shiftProgressPercent = Math.min(100, Math.round((elapsedSeconds / (9 * 3600)) * 100));
 
   return (
-    <div id="punch-card-panel" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xs text-slate-900">
-      {/* 1. Header Greeting & Status Overview */}
-      <div className="mb-6 pb-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">
+    <div id="punch-card-panel" className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 lg:p-7 shadow-xs text-slate-900 space-y-4 sm:space-y-5">
+      {/* -------------------------------------------------------------------
+          1. GREETING & IDENTITY SECTION (Compact, Dynamic IST)
+          ------------------------------------------------------------------- */}
+      <div className="flex items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
+        <div className="min-w-0">
+          <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-900 truncate">
             {getGreetingText()}
           </h2>
-          <p className="text-xs text-slate-600 mt-1 font-medium flex items-center space-x-1.5">
+          <p className="text-xs text-slate-600 mt-0.5 font-medium flex items-center space-x-1.5 truncate">
             <span className="font-semibold text-slate-800">{user?.designation || 'Site Staff'}</span>
             <span>&bull;</span>
-            <span className="text-slate-600">{selectedSite?.siteName || 'Assigned Project Site'}</span>
+            <span className="text-slate-600 truncate">{selectedSite?.siteName || 'RCL'}</span>
           </p>
         </div>
 
         {/* Dynamic Status Badge */}
-        <div>
+        <div className="shrink-0">
           {activeSession ? (
-            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
-              <span>Shift in Progress</span>
+            <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+              <span>Working Now</span>
             </div>
           ) : (
-            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs">
-              <span className="w-2 h-2 rounded-full bg-slate-400" />
+            <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
               <span>Ready to Sign In</span>
             </div>
           )}
@@ -303,84 +315,77 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
       {/* Notifications */}
       {error && (
-        <div className="mb-5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start space-x-3">
+        <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start space-x-2.5">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
-          <div>
-            <span className="font-bold block">Notice:</span>
+          <div className="flex-1">
+            <span className="font-bold">Notice: </span>
             <span>{error}</span>
           </div>
         </div>
       )}
 
       {successMsg && (
-        <div className="mb-5 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start space-x-3">
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start space-x-2.5">
           <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
-          <div>
-            <span className="font-bold block">Success:</span>
+          <div className="flex-1">
+            <span className="font-bold">Success: </span>
             <span>{successMsg}</span>
           </div>
         </div>
       )}
 
-      {/* =========================================================================
-          2. PRIMARY VISUAL ELEMENT: DYNAMIC SIGN IN / SIGN OUT HERO ACTION BLOCK
-          ========================================================================= */}
+      {/* -------------------------------------------------------------------
+          ACTIVE SESSION HERO: SIGN OUT BLOCK
+          ------------------------------------------------------------------- */}
       {activeSession ? (
-        /* ---------------- ACTIVE SESSION: SIGN OUT HERO BLOCK ---------------- */
-        <div className="p-6 sm:p-7 rounded-3xl bg-slate-900 text-white shadow-md border border-slate-800">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 text-white shadow-xs border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <div className="flex items-center space-x-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[11px] font-extrabold uppercase tracking-widest text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-400">
                   {activeSession.shiftType} SHIFT ONGOING
                 </span>
                 {activeSession.isExtraShift && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-500/30 text-purple-200 border border-purple-400/30 uppercase">
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-200 border border-purple-400/30 uppercase">
                     Extra Night
                   </span>
                 )}
               </div>
-              <h3 className="text-xl font-extrabold text-white mt-1">
-                {activeSession.siteNameSnapshot}
+              <h3 className="text-base sm:text-lg font-extrabold text-white mt-1 truncate">
+                {activeSession.siteNameSnapshot || selectedSite?.siteName || 'Project Site'}
               </h3>
-              <p className="text-xs text-slate-300 mt-1 flex items-center space-x-1.5">
-                <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>{activeSession.locationNameSnapshot || 'Main Gate Perimeter'}</span>
+              <p className="text-xs text-slate-300 mt-0.5 flex items-center space-x-1 truncate">
+                <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                <span className="truncate">{activeSession.locationNameSnapshot || 'Site Perimeter'}</span>
                 <span>&bull;</span>
                 <span>
-                  Started at{' '}
-                  <span className="font-bold text-white">
-                    {new Date(activeSession.signInTime!).toLocaleTimeString('en-US', {
-                      timeZone: 'Asia/Kolkata',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}{' '}
-                    IST
-                  </span>
+                  Started{' '}
+                  <strong className="text-white">
+                    {formatTime(activeSession.signInTime)} IST
+                  </strong>
                 </span>
               </p>
             </div>
 
             {/* Live Working Digital Counter */}
-            <div className="sm:text-right bg-slate-800/80 px-4 py-2.5 rounded-2xl border border-slate-700/60 shrink-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Elapsed Working Time
+            <div className="text-right bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-700/70 shrink-0">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">
+                Working Time
               </span>
-              <span className="text-2xl sm:text-3xl font-mono font-extrabold text-amber-400 tracking-tight">
+              <span className="text-xl sm:text-2xl font-mono font-extrabold text-amber-400 tracking-tight">
                 {elapsedTime}
               </span>
             </div>
           </div>
 
           {/* Shift Progress Visual Bar */}
-          <div className="py-4">
-            <div className="flex items-center justify-between text-xs text-slate-300 mb-1.5 font-medium">
-              <span>Shift Completion Benchmark</span>
-              <span className="font-mono font-bold text-emerald-400">{shiftProgressPercent}% (Standard 9.0h)</span>
+          <div>
+            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-1 font-medium">
+              <span>9.0h Benchmark</span>
+              <span className="font-mono font-bold text-emerald-400">{shiftProgressPercent}%</span>
             </div>
-            <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-amber-400 to-emerald-400 rounded-full transition-all duration-500"
                 style={{ width: `${shiftProgressPercent}%` }}
@@ -388,175 +393,207 @@ export const PunchCard: React.FC<PunchCardProps> = ({
             </div>
           </div>
 
-          {/* PRIMARY VISUAL ACTION BUTTON: SIGN OUT */}
-          <div className="pt-2">
-            <button
-              id="btn-sign-out"
-              type="button"
-              onClick={handlePunchOut}
-              disabled={loading}
-              className="w-full py-4 sm:py-4.5 px-6 rounded-2xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-extrabold text-base sm:text-lg transition flex items-center justify-center space-x-2.5 shadow-lg hover:shadow-rose-600/30 cursor-pointer disabled:opacity-50"
-            >
-              {loading ? (
-                <span className="flex items-center space-x-2">
-                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  <span>Verifying Location & Signing Out...</span>
-                </span>
-              ) : (
-                <span className="flex items-center space-x-2">
-                  <Square className="w-5 h-5 fill-current" />
-                  <span>SIGN OUT &bull; COMPLETE SHIFT</span>
-                </span>
-              )}
-            </button>
-          </div>
+          {/* SIGN OUT PRIMARY BUTTON */}
+          <button
+            id="btn-sign-out"
+            type="button"
+            onClick={handlePunchOut}
+            disabled={loading}
+            className="w-full py-3.5 px-5 rounded-xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-extrabold text-sm sm:text-base transition flex items-center justify-center space-x-2 shadow-sm cursor-pointer disabled:opacity-50"
+          >
+            {loading ? (
+              <span className="flex items-center space-x-2">
+                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span>Signing Out...</span>
+              </span>
+            ) : (
+              <span className="flex items-center space-x-2">
+                <Square className="w-4 h-4 fill-current" />
+                <span>SIGN OUT &bull; COMPLETE SHIFT</span>
+              </span>
+            )}
+          </button>
         </div>
       ) : (
-        /* ---------------- NO ACTIVE SESSION: SIGN IN HERO BLOCK ---------------- */
-        <div className="space-y-6">
-          {/* Shift Selection Cards */}
+        /* -------------------------------------------------------------------
+            NO ACTIVE SESSION: SHIFT SELECTION & SIGN IN WORKFLOW
+            ------------------------------------------------------------------- */
+        <div className="space-y-3.5 sm:space-y-4">
+          {/* -------------------------------------------------------------------
+              2. SHIFT SELECTION — REDESIGNED (Compact Horizontal Selector)
+              ------------------------------------------------------------------- */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">
-              1. Select Shift Type
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                Select Shift
+              </span>
+              {isNightExtraShiftEligible && (
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                  Day Completed &bull; Extra Night Eligible
+                </span>
+              )}
+            </div>
+
+            {/* Horizontal Compact Shift Selector */}
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
+              {/* DAY Shift */}
               <button
                 type="button"
                 onClick={() => setSelectedShift('DAY')}
-                className={`p-4 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
+                className={`p-2.5 sm:p-3 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
                   selectedShift === 'DAY'
-                    ? 'bg-amber-50/80 border-amber-400 ring-2 ring-amber-400/40 text-slate-900 shadow-xs'
+                    ? 'bg-amber-50/90 border-amber-400 ring-2 ring-amber-400/40 text-slate-900 shadow-2xs'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <div className="flex items-center space-x-3.5">
-                  <div className="w-11 h-11 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
-                    <Sun className="w-6 h-6" />
+                <div className="flex items-center space-x-2 sm:space-x-2.5 min-w-0">
+                  <div
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                      selectedShift === 'DAY' ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-700'
+                    }`}
+                  >
+                    <Sun className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="font-bold text-sm text-slate-900">DAY Shift</div>
-                    <div className="text-[11px] text-slate-500 font-medium">08:00 AM – 05:00 PM IST</div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-xs sm:text-sm text-slate-900 truncate">DAY SHIFT</div>
+                    <div className="text-[10px] text-slate-500 font-medium truncate">08:00 AM–05:00 PM</div>
                   </div>
                 </div>
                 {selectedShift === 'DAY' && (
-                  <CheckCircle2 className="w-5 h-5 text-amber-600 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0 hidden sm:block" />
                 )}
               </button>
 
+              {/* NIGHT Shift */}
               <button
                 type="button"
                 onClick={() => setSelectedShift('NIGHT')}
-                className={`p-4 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
+                className={`p-2.5 sm:p-3 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
                   selectedShift === 'NIGHT'
-                    ? 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-400/40 text-slate-900 shadow-xs'
+                    ? 'bg-indigo-50/90 border-indigo-400 ring-2 ring-indigo-400/40 text-slate-900 shadow-2xs'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <div className="flex items-center space-x-3.5">
-                  <div className="w-11 h-11 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-700 shrink-0">
-                    <Moon className="w-6 h-6" />
+                <div className="flex items-center space-x-2 sm:space-x-2.5 min-w-0">
+                  <div
+                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                      selectedShift === 'NIGHT' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-700'
+                    }`}
+                  >
+                    <Moon className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="font-bold text-sm text-slate-900 flex items-center space-x-1.5">
-                      <span>NIGHT Shift</span>
+                  <div className="min-w-0">
+                    <div className="font-bold text-xs sm:text-sm text-slate-900 flex items-center space-x-1 truncate">
+                      <span className="truncate">NIGHT SHIFT</span>
                       {isNightExtraShiftEligible && (
-                        <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+                        <span className="text-[8px] font-extrabold uppercase px-1 py-0.2 rounded bg-purple-100 text-purple-700 shrink-0">
                           Extra
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-slate-500 font-medium">07:00 PM – 04:00 AM IST</div>
+                    <div className="text-[10px] text-slate-500 font-medium truncate">07:00 PM–04:00 AM</div>
                   </div>
                 </div>
                 {selectedShift === 'NIGHT' && (
-                  <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />
+                  <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0 hidden sm:block" />
                 )}
               </button>
             </div>
           </div>
 
-          {/* Assigned Project Site Selection */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              2. Assigned Project Site
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {availableSites.map((site) => (
-                <button
-                  key={site.siteId}
-                  type="button"
-                  onClick={() => setSelectedSiteId(site.siteId)}
-                  className={`p-3.5 rounded-xl border text-left transition flex items-center space-x-3 cursor-pointer ${
-                    selectedSiteId === site.siteId
-                      ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
+          {/* Assigned Project Site & Gate Selector (Compact) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Site selector if multiple sites */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Assigned Site
+              </label>
+              {availableSites.length <= 1 ? (
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 flex items-center space-x-2">
+                  <Building className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="truncate">{availableSites[0]?.siteName || 'RCL • WALSHIND'}</span>
+                </div>
+              ) : (
+                <select
+                  value={selectedSiteId}
+                  onChange={(e) => setSelectedSiteId(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900 cursor-pointer"
                 >
-                  <Building className={`w-4 h-4 shrink-0 ${selectedSiteId === site.siteId ? 'text-amber-400' : 'text-slate-400'}`} />
-                  <div className="truncate">
-                    <div className="font-bold text-xs truncate">{site.siteName}</div>
-                  </div>
-                </button>
-              ))}
+                  {availableSites.map((s) => (
+                    <option key={s.siteId} value={s.siteId}>
+                      {s.siteName}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Location Gate Selector */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Attendance Gate / Perimeter
+              </label>
+              {siteLocations.length <= 1 ? (
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 flex items-center space-x-2">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  <span className="truncate">{siteLocations[0]?.locationName || 'Main Gate Perimeter'}</span>
+                </div>
+              ) : (
+                <select
+                  value={selectedLocationId}
+                  onChange={(e) => setSelectedLocationId(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-slate-900 cursor-pointer"
+                >
+                  {siteLocations.map((loc) => {
+                    const lId = loc.locationId || loc.id || '';
+                    return (
+                      <option key={lId} value={lId}>
+                        {loc.locationName || loc.name || 'Site Perimeter'}
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
             </div>
           </div>
 
-          {/* Site Location / Gate Selector (if multiple) */}
-          {siteLocations.length > 1 && (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                3. Site Location / Gate
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {siteLocations.map((loc) => {
-                  const locId = loc.locationId || loc.id || '';
-                  const isSelected = selectedLocationId === locId;
-                  return (
-                    <button
-                      key={locId}
-                      type="button"
-                      onClick={() => setSelectedLocationId(locId)}
-                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                        isSelected
-                          ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-400/40 text-slate-900'
-                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="font-bold text-xs text-slate-900">{loc.locationName || loc.name}</div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 truncate">{loc.address || 'Authorized Site Perimeter'}</p>
-                    </button>
-                  );
-                })}
+          {/* -------------------------------------------------------------------
+              3. LOCATION VERIFICATION (Clean & Human-Readable)
+              ------------------------------------------------------------------- */}
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+            <div className="flex items-center space-x-2.5 min-w-0">
+              <div className="shrink-0">
+                {locationStatus === 'CHECKING' && (
+                  <span className="w-4 h-4 border-2 border-slate-400 border-t-slate-900 rounded-full animate-spin block" />
+                )}
+                {locationStatus === 'VERIFIED' && (
+                  <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 ring-4 ring-emerald-100 block" />
+                )}
+                {locationStatus === 'OUTSIDE' && (
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                )}
+                {(locationStatus === 'PERMISSION_REQUIRED' || locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && (
+                  <MapPin className="w-4 h-4 text-slate-500" />
+                )}
               </div>
-            </div>
-          )}
 
-          {/* Clean Location Verification Badge */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
-            <div className="flex items-center space-x-3">
-              {locationStatus === 'CHECKING' && (
-                <span className="w-4 h-4 border-2 border-slate-400 border-t-slate-900 rounded-full animate-spin shrink-0" />
-              )}
-              {locationStatus === 'VERIFIED' && (
-                <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 ring-4 ring-emerald-100 shrink-0" />
-              )}
-              {locationStatus === 'OUTSIDE' && (
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              )}
-              {(locationStatus === 'PERMISSION_REQUIRED' || locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && (
-                <MapPin className="w-4 h-4 text-slate-500 shrink-0" />
-              )}
-
-              <div className="text-xs">
-                <span className="font-bold text-slate-900">
-                  {locationStatus === 'VERIFIED' && '● Location Verified'}
-                  {locationStatus === 'OUTSIDE' && '⚠ Outside Attendance Area'}
-                  {locationStatus === 'PERMISSION_REQUIRED' && 'Location Permission Required'}
-                  {locationStatus === 'CHECKING' && 'Checking Location...'}
-                  {(locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && 'Location Verification'}
-                </span>
-                <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
-                  {locationMessage || 'Location is verified on your assigned site.'}
+              <div className="min-w-0">
+                <div className="flex items-center space-x-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                    📍 Location Verification
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-medium truncate">
+                    &bull; {selectedSite?.siteName || 'RCL'} {selectedLoc?.locationName ? `(${selectedLoc.locationName})` : ''}
+                  </span>
+                </div>
+                <p className="text-xs font-bold text-slate-900 mt-0.5 truncate">
+                  {locationStatus === 'VERIFIED' && <span className="text-emerald-700">● Inside authorized area</span>}
+                  {locationStatus === 'OUTSIDE' && <span className="text-amber-700">⚠ Outside authorized area</span>}
+                  {locationStatus === 'PERMISSION_REQUIRED' && <span className="text-rose-700">Location permission required</span>}
+                  {locationStatus === 'CHECKING' && <span className="text-slate-600">Verifying location...</span>}
+                  {(locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && (
+                    <span className="text-slate-700">Ready to verify location</span>
+                  )}
                 </p>
               </div>
             </div>
@@ -565,109 +602,190 @@ export const PunchCard: React.FC<PunchCardProps> = ({
               type="button"
               onClick={verifyLocationStatus}
               disabled={locationStatus === 'CHECKING'}
-              className="p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition text-xs flex items-center space-x-1 shrink-0 font-medium cursor-pointer"
-              title="Re-verify Location"
+              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-white border border-slate-200 transition text-xs font-semibold flex items-center space-x-1 shrink-0 cursor-pointer shadow-2xs"
+              title="Re-check Location"
             >
               <RotateCcw className={`w-3.5 h-3.5 ${locationStatus === 'CHECKING' ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Check</span>
             </button>
           </div>
 
-          {/* PRIMARY VISUAL ACTION BUTTON: SIGN IN */}
-          <div className="pt-2">
-            <button
-              id="btn-sign-in"
-              type="button"
-              onClick={handlePunchIn}
-              disabled={loading}
-              className="w-full py-4 sm:py-4.5 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-extrabold text-base sm:text-lg transition flex items-center justify-center space-x-2.5 shadow-lg hover:shadow-slate-900/30 cursor-pointer disabled:opacity-50"
-            >
-              {loading ? (
-                <span className="flex items-center space-x-2">
-                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  <span>Verifying Location & Signing In...</span>
-                </span>
-              ) : (
-                <span className="flex items-center space-x-2.5">
-                  <Play className="w-5 h-5 fill-current text-amber-400" />
-                  <span>SIGN IN &bull; {selectedShift} SHIFT</span>
-                </span>
-              )}
-            </button>
-          </div>
+          {/* -------------------------------------------------------------------
+              4. PRIMARY ATTENDANCE BUTTON: SIGN IN
+              ------------------------------------------------------------------- */}
+          <button
+            id="btn-sign-in"
+            type="button"
+            onClick={handlePunchIn}
+            disabled={loading}
+            className="w-full py-3.5 sm:py-4 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-extrabold text-base transition flex items-center justify-center space-x-2.5 shadow-sm cursor-pointer disabled:opacity-50"
+          >
+            {loading ? (
+              <span className="flex items-center space-x-2">
+                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                <span>Verifying Location & Signing In...</span>
+              </span>
+            ) : (
+              <span className="flex items-center space-x-2">
+                <Play className="w-4 h-4 fill-current text-amber-400" />
+                <span>SIGN IN &bull; {selectedShift} SHIFT</span>
+              </span>
+            )}
+          </button>
         </div>
       )}
 
-      {/* =========================================================================
-          3. SHIFT STATUS & ATTENDANCE SUMMARY METRICS
-          ========================================================================= */}
-      <div className="mt-8 pt-6 border-t border-slate-100">
-        <div className="flex items-center justify-between mb-4">
+      {/* -------------------------------------------------------------------
+          5. TODAY'S ATTENDANCE RECORDS (Directly below Sign In / Sign Out)
+          ------------------------------------------------------------------- */}
+      <div className="pt-4 border-t border-slate-100 space-y-3">
+        <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <CalendarCheck className="w-4 h-4 text-slate-700" />
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Today's Attendance Summary
+            <Clock className="w-4 h-4 text-slate-700" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+              Today's Attendance
             </h3>
           </div>
           <span className="text-[11px] font-mono font-semibold text-slate-500">
-            {todayShifts.length} {todayShifts.length === 1 ? 'Session' : 'Sessions'} Recorded
+            {todayShifts.length} {todayShifts.length === 1 ? 'Record' : 'Records'}
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Total Working Hours */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
-            <div className="flex items-center space-x-2 text-slate-500 mb-1">
-              <Clock className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-bold uppercase tracking-wider">Logged Hours</span>
-            </div>
-            <div className="text-lg font-mono font-extrabold text-slate-900">
-              {todayTotalHours.toFixed(1)} hrs
-            </div>
-            <span className="text-[10px] text-slate-500 font-medium">Standard Target: 9.0h</span>
+        {todayShifts.length === 0 ? (
+          <div className="py-6 text-center text-slate-400 text-xs bg-slate-50/80 rounded-2xl border border-slate-100">
+            No attendance records logged today yet.
           </div>
+        ) : (
+          <div className="space-y-2.5">
+            {todayShifts.map((record) => {
+              const recId = record.recordId || record.id;
+              const isOpen = record.sessionStatus === 'OPEN' || record.attendanceState === 'SIGNED_IN';
 
-          {/* Shift Classification */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
-            <div className="flex items-center space-x-2 text-slate-500 mb-1">
-              <Award className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-bold uppercase tracking-wider">Shift Credit</span>
-            </div>
-            <div className="text-lg font-bold text-slate-900">
-              {todayTotalHours >= 9.0
-                ? 'Full Day'
-                : todayTotalHours >= 4.0
-                ? 'Half Day'
-                : todayTotalHours > 0
-                ? 'In Progress'
-                : 'Not Recorded'}
-            </div>
-            <span className="text-[10px] text-slate-500 font-medium">
-              {todayTotalHours >= 9.0 ? '1.0 Regular Unit' : todayTotalHours >= 4.0 ? '0.5 Unit Earned' : '0.0 Unit'}
-            </span>
-          </div>
+              return (
+                <div
+                  key={recId}
+                  className={`p-3.5 rounded-2xl border transition ${
+                    isOpen
+                      ? 'bg-emerald-50/60 border-emerald-300 shadow-2xs'
+                      : 'bg-slate-50/90 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center space-x-2.5 min-w-0">
+                      <div
+                        className={`p-2 rounded-xl shrink-0 ${
+                          record.shiftType === 'DAY'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-indigo-100 text-indigo-700'
+                        }`}
+                      >
+                        {record.shiftType === 'DAY' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="font-bold text-xs text-slate-900">{record.shiftType} SHIFT</span>
+                          {record.isExtraShift && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-700">
+                              Extra Night
+                            </span>
+                          )}
+                          {record.isLate && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-700">
+                              Late
+                            </span>
+                          )}
+                          {record.signOutType === 'AUTO_SIGNED_OUT' && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">
+                              Auto Closed
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                          {record.siteNameSnapshot || 'RCL'} • {record.locationNameSnapshot || 'WALSHIND'}
+                        </p>
+                      </div>
+                    </div>
 
-          {/* Security & Verification Status */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
-            <div className="flex items-center space-x-2 text-slate-500 mb-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="text-[11px] font-bold uppercase tracking-wider">Site Compliance</span>
-            </div>
-            <div className="text-lg font-bold text-emerald-700">
-              Verified
-            </div>
-            <span className="text-[10px] text-slate-500 font-medium">GPS Geofence Protected</span>
+                    {/* Status Pill */}
+                    <div className="shrink-0">
+                      {isOpen ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          Active
+                        </span>
+                      ) : record.attendanceStatus === 'PRESENT_FULL_DAY' ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          Full Day
+                        </span>
+                      ) : record.attendanceStatus === 'PRESENT_HALF_DAY' ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                          Half Day
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                          {record.attendanceStatus || 'Recorded'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Compact Time Grid: SIGN IN | SIGN OUT | DURATION */}
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-white p-1.5 rounded-xl border border-slate-200/80">
+                      <div className="text-[9px] text-slate-500 font-bold uppercase">SIGN IN</div>
+                      <div className="font-mono text-slate-900 font-semibold text-[11px] mt-0.5">
+                        {formatTime(record.signInTime)}
+                      </div>
+                    </div>
+                    <div className="bg-white p-1.5 rounded-xl border border-slate-200/80">
+                      <div className="text-[9px] text-slate-500 font-bold uppercase">SIGN OUT</div>
+                      <div className="font-mono text-slate-900 font-semibold text-[11px] mt-0.5">
+                        {isOpen ? 'ACTIVE' : formatTime(record.signOutTime)}
+                      </div>
+                    </div>
+                    <div className="bg-white p-1.5 rounded-xl border border-slate-200/80">
+                      <div className="text-[9px] text-slate-500 font-bold uppercase">DURATION</div>
+                      <div className="font-mono text-slate-900 font-bold text-[11px] mt-0.5">
+                        {isOpen
+                          ? 'In Progress'
+                          : `${Math.floor((record.workingMinutes || 0) / 60)}h ${(record.workingMinutes || 0) % 60}m`}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Policy Footer */}
-      <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-        <span className="flex items-center space-x-1.5 font-medium">
-          <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-          <span>Milestone Consultancy Multi-Site Attendance</span>
-        </span>
-        <span className="font-mono">IST Shift Policy</span>
+      {/* -------------------------------------------------------------------
+          6. ATTENDANCE SUMMARY METRICS (Hours Logged, Credit, Compliance)
+          ------------------------------------------------------------------- */}
+      <div className="pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-center">
+        <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/70">
+          <span className="text-[10px] font-bold text-slate-500 uppercase block">Logged</span>
+          <span className="text-sm font-mono font-extrabold text-slate-900 block mt-0.5">
+            {todayTotalHours.toFixed(1)}h
+          </span>
+          <span className="text-[9px] text-slate-400 font-medium">9.0h Target</span>
+        </div>
+
+        <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/70">
+          <span className="text-[10px] font-bold text-slate-500 uppercase block">Credit</span>
+          <span className="text-sm font-bold text-slate-900 block mt-0.5">
+            {todayTotalHours >= 9.0 ? '1.0 Full' : todayTotalHours >= 4.0 ? '0.5 Half' : todayTotalHours > 0 ? 'Active' : '0.0'}
+          </span>
+          <span className="text-[9px] text-slate-400 font-medium">Unit Earned</span>
+        </div>
+
+        <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/70">
+          <span className="text-[10px] font-bold text-slate-500 uppercase block">Perimeter</span>
+          <span className="text-sm font-bold text-emerald-700 block mt-0.5 flex items-center justify-center space-x-1">
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Verified</span>
+          </span>
+          <span className="text-[9px] text-slate-400 font-medium">Geofenced</span>
+        </div>
       </div>
     </div>
   );
