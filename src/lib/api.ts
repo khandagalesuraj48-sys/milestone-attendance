@@ -5,6 +5,7 @@ import { auth } from './firebase';
 import { getOrCreateInstallationKey } from './device';
 import {
   User,
+  Employee,
   AttendanceRecord,
   Site,
   LocationSite,
@@ -283,6 +284,15 @@ export const api = {
 
   async getMyLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {
     return request('/api/v1/attendance/leaves');
+  },
+
+  async getMyProfile(): Promise<{
+    success: boolean;
+    user: User;
+    employee?: Employee;
+    assignedSites?: Site[];
+  }> {
+    return request('/api/v1/attendance/my-profile');
   },
 
   // Admin Endpoints

@@ -10,8 +10,8 @@ import { PunchCard } from './components/EmployeeDashboard/PunchCard';
 import { AutoSignOutNotice } from './components/EmployeeDashboard/AutoSignOutNotice';
 import { TodayShiftList } from './components/EmployeeDashboard/TodayShiftList';
 import { MonthlyRegister } from './components/EmployeeDashboard/MonthlyRegister';
-import { DeviceCard } from './components/EmployeeDashboard/DeviceCard';
 import { LeaveRequestCard } from './components/EmployeeDashboard/LeaveRequestCard';
+import { MyProfile } from './components/EmployeeDashboard/MyProfile';
 
 // Admin Components
 import { OperationsBoard } from './components/AdminDashboard/OperationsBoard';
@@ -45,7 +45,7 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<AttendanceRecord | null>(null);
   const [todayShifts, setTodayShifts] = useState<AttendanceRecord[]>([]);
   const [autoSignOutNotice, setAutoSignOutNotice] = useState<any>(null);
-  const [empActiveTab, setEmpActiveTab] = useState<'PUNCH' | 'HISTORY' | 'LEAVE' | 'DEVICE'>('PUNCH');
+  const [empActiveTab, setEmpActiveTab] = useState<'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE'>('SHIFT');
 
   // Admin State
   const [adminActiveTab, setAdminActiveTab] = useState<
@@ -165,7 +165,11 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-slate-900 selection:text-white">
       {/* Top Authoritative Navbar */}
-      <Navbar user={currentUser} onLogout={handleLogout} />
+      <Navbar
+        user={currentUser}
+        onLogout={handleLogout}
+        onProfileClick={() => currentUser.role === 'employee' && setEmpActiveTab('PROFILE')}
+      />
 
       {/* Main App Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -324,7 +328,7 @@ export default function App() {
           </div>
         ) : (
           /* =========================================================================
-             EMPLOYEE SELF-SERVICE PORTAL
+             EMPLOYEE SELF-SERVICE PORTAL (CLEAN & PROFESSIONAL WORKFORCE APP)
              ========================================================================= */
           <div className="space-y-6">
             {/* Auto Sign-Out Notification Banner */}
@@ -333,22 +337,22 @@ export default function App() {
             {/* Employee Tab Navigation */}
             <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-xs text-xs">
               <button
-                id="tab-emp-punch"
-                onClick={() => setEmpActiveTab('PUNCH')}
-                className={`px-4 py-2 rounded-xl font-semibold flex items-center space-x-2 transition ${
-                  empActiveTab === 'PUNCH'
+                id="tab-emp-shift"
+                onClick={() => setEmpActiveTab('SHIFT')}
+                className={`px-4 py-2.5 rounded-xl font-semibold flex items-center space-x-2 transition ${
+                  empActiveTab === 'SHIFT'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
                 <Clock className="w-4 h-4" />
-                <span>Shift Punch & Clock</span>
+                <span>Shift & Attendance</span>
               </button>
 
               <button
-                id="tab-emp-history"
+                id="tab-emp-register"
                 onClick={() => setEmpActiveTab('HISTORY')}
-                className={`px-4 py-2 rounded-xl font-semibold flex items-center space-x-2 transition ${
+                className={`px-4 py-2.5 rounded-xl font-semibold flex items-center space-x-2 transition ${
                   empActiveTab === 'HISTORY'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -361,7 +365,7 @@ export default function App() {
               <button
                 id="tab-emp-leave"
                 onClick={() => setEmpActiveTab('LEAVE')}
-                className={`px-4 py-2 rounded-xl font-semibold flex items-center space-x-2 transition ${
+                className={`px-4 py-2.5 rounded-xl font-semibold flex items-center space-x-2 transition ${
                   empActiveTab === 'LEAVE'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -372,21 +376,21 @@ export default function App() {
               </button>
 
               <button
-                id="tab-emp-device"
-                onClick={() => setEmpActiveTab('DEVICE')}
-                className={`px-4 py-2 rounded-xl font-semibold flex items-center space-x-2 transition ${
-                  empActiveTab === 'DEVICE'
+                id="tab-emp-profile"
+                onClick={() => setEmpActiveTab('PROFILE')}
+                className={`px-4 py-2.5 rounded-xl font-semibold flex items-center space-x-2 transition ${
+                  empActiveTab === 'PROFILE'
                     ? 'bg-slate-900 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                 }`}
               >
-                <Smartphone className="w-4 h-4" />
-                <span>1:1 Device Binding</span>
+                <Users className="w-4 h-4" />
+                <span>My Profile</span>
               </button>
             </div>
 
             {/* Tab Views */}
-            {empActiveTab === 'PUNCH' && (
+            {empActiveTab === 'SHIFT' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-7">
                   <PunchCard
@@ -406,7 +410,9 @@ export default function App() {
 
             {empActiveTab === 'LEAVE' && <LeaveRequestCard />}
 
-            {empActiveTab === 'DEVICE' && <DeviceCard />}
+            {empActiveTab === 'PROFILE' && (
+              <MyProfile user={currentUser} onUserUpdated={(u) => setCurrentUser(u)} />
+            )}
           </div>
         )}
       </main>
@@ -415,7 +421,7 @@ export default function App() {
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-wrap items-center justify-between gap-2">
           <span>&copy; {new Date().getFullYear()} Milestone Consultancy. All rights reserved.</span>
-          <span className="font-mono text-slate-500">Milestone Attendance System V1 Multi-Site &bull; IST Standard Time</span>
+          <span className="font-mono text-slate-500">Milestone Attendance System &bull; IST Standard Time</span>
         </div>
       </footer>
     </div>

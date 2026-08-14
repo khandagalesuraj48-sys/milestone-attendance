@@ -162,10 +162,66 @@ attendanceRouter.get('/my-history', async (req: AuthenticatedRequest, res: Respo
 
   try {
     const records = await attendanceRepository.getMonthlyForEmployee(user.employeeId, month);
+
+    let fullDays = 0;
+    let halfDays = 0;
+    let absentDays = 0;
+    let lateCount = 0;
+    let totalWorkingMinutes = 0;
+    let extraNights = 0;
+
+    for (const r of records) {
+      if (r.attendanceStatus === 'PRESENT_FULL_DAY') {
+        fullDays++;
+      } else if (r.attendanceStatus === 'PRESENT_HALF_DAY') {
+        halfDays++;
+      } else if (r.attendanceStatus === 'ABSENT') {
+        absentDays++;
+      }
+      if (r.isLate) lateCount++;
+      if (r.isExtraShift) extraNights++;
+      if (r.workingMinutes) totalWorkingMinutes += r.workingMinutes;
+    }
+
+    const presentCount = fullDays + (halfDays * 0.5);
+    const totalHours = Number((totalWorkingMinutes / 60).toFixed(1));
+
     return res.json({
       success: true,
       month,
       records,
+      stats: {
+        presentCount,
+        fullDays,
+        halfDays,
+        absentDays,
+        lateCountInMonth: lateCount,
+        lateCount,
+        extraNights,
+        totalWorkingMinutes,
+        totalHours,
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/my-profile - Comprehensive profile for authenticated employee
+attendanceRouter.get('/my-profile', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  try {
+    const employee = await employeesRepository.getById(user.employeeId);
+    let assignedSites: any[] = [];
+    if (employee?.assignedSiteIds && employee.assignedSiteIds.length > 0) {
+      const allSites = await sitesRepository.getActive();
+      assignedSites = allSites.filter((s) => employee.assignedSiteIds.includes(s.siteId));
+    }
+    return res.json({
+      success: true,
+      user,
+      employee,
+      assignedSites,
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });

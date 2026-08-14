@@ -215,6 +215,25 @@ export const attendanceService = {
       throw new Error('No active open session found to sign out from.');
     }
 
+    // Geofence Validation on Sign Out
+    if (activeSession.locationId) {
+      const location = await locationsRepository.getById(activeSession.locationId);
+      if (location && location.isActive) {
+        const geoCheck = geoService.validateLocationGeofence(
+          latitude,
+          longitude,
+          accuracy || 10,
+          location.latitude,
+          location.longitude,
+          location.radiusMeters,
+          location.accuracyThresholdMeters || 100
+        );
+        if (!geoCheck.accuracyPassed || !geoCheck.isWithinGeofence) {
+          throw new Error(geoCheck.errorMessage || 'Outside Attendance Area. You must be within your assigned site to sign out.');
+        }
+      }
+    }
+
     const now = new Date();
     const nowIso = now.toISOString();
     const rules = await policyRepository.getRules();
