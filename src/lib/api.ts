@@ -173,6 +173,13 @@ export const api = {
     return request<{ success: boolean; user: User }>('/api/v1/auth/me');
   },
 
+  async changePassword(newPassword: string, confirmPassword?: string): Promise<{ success: boolean; user: User; message: string }> {
+    return request<{ success: boolean; user: User; message: string }>('/api/v1/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ newPassword, confirmPassword }),
+    });
+  },
+
   async logout(): Promise<void> {
     try {
       await request('/api/v1/auth/logout', { method: 'POST' });

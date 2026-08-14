@@ -154,24 +154,78 @@ authRouter.post('/session-init', sessionInitLimiter, requireAuth, async (req: Au
 });
 
 // POST /api/v1/auth/change-password
-// Employee self-service password change is strictly prohibited. Only administrators may manage passwords.
+// Allows authenticated users to update their temporary password on first login
 authRouter.post('/change-password', passwordChangeLimiter, requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const user = req.user;
+  const user = req.user!;
+  const { newPassword, confirmPassword } = req.body;
 
-  // Enforce server-authoritative Firestore user profile verification
-  if (!user || user.role !== 'admin' || user.accountStatus !== 'ACTIVE') {
-    return res.status(403).json({
+  if (!newPassword || typeof newPassword !== 'string') {
+    return res.status(400).json({
       success: false,
-      error: 'FORBIDDEN',
-      message: 'Only administrators can change user passwords.',
+      error: 'INVALID_PASSWORD',
+      message: 'New password is required.',
     });
   }
 
-  return res.status(403).json({
-    success: false,
-    error: 'FORBIDDEN',
-    message: 'Only administrators can change user passwords.',
-  });
+  const cleanPass = newPassword.trim();
+  if (cleanPass.length < 8 || cleanPass.length > 128) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_PASSWORD_LENGTH',
+      message: 'Password must be between 8 and 128 characters long.',
+    });
+  }
+
+  if (confirmPassword && typeof confirmPassword === 'string') {
+    if (cleanPass !== confirmPassword.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'PASSWORD_MISMATCH',
+        message: 'New password and confirmation password do not match.',
+      });
+    }
+  }
+
+  try {
+    // 1. Update password in Firebase Authentication
+    await adminAuth.updateUser(user.uid, { password: cleanPass });
+
+    // 2. Update Firestore user document to mark mustChangePassword = false
+    await usersRepository.update(user.uid, {
+      mustChangePassword: false,
+    });
+
+    // 3. Fetch latest authoritative user profile from Firestore
+    const updatedUser = await usersRepository.getByUid(user.uid);
+
+    // 4. Audit the password change event
+    await auditRepository.log({
+      actorId: user.employeeId,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'PASSWORD_CHANGED',
+      targetId: user.uid,
+      details: {
+        message: user.mustChangePassword
+          ? 'First-login temporary password successfully updated.'
+          : 'User password changed.',
+      },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      user: updatedUser || { ...user, mustChangePassword: false },
+      message: 'Your password has been successfully updated. Welcome to Milestone Workforce Platform.',
+    });
+  } catch (err: any) {
+    console.error('[change-password] Error updating password:', err?.message || err);
+    return res.status(500).json({
+      success: false,
+      error: 'PASSWORD_UPDATE_FAILED',
+      message: err.message || 'Failed to update password. Please try again.',
+    });
+  }
 });
 
 // GET /api/v1/auth/me

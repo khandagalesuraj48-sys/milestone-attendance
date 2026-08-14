@@ -3,6 +3,7 @@ import { User, AttendanceRecord, LocationSite } from './types';
 import { api } from './lib/api';
 import { Navbar } from './components/Navbar';
 import { AuthScreen } from './components/AuthScreen';
+import { ForcePasswordChangeScreen } from './components/ForcePasswordChangeScreen';
 
 // Employee Components
 import { PunchCard } from './components/EmployeeDashboard/PunchCard';
@@ -147,33 +148,17 @@ export default function App() {
     return <AuthScreen onLoginSuccess={(user) => setCurrentUser(user)} />;
   }
 
-  // If password change/reset is required, display strict administrator reset notice
+  // If password change/reset is required on first login, display mandatory Change Password screen
   if (currentUser.mustChangePassword) {
     return (
-      <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-slate-900 selection:text-white">
-        <Navbar user={currentUser} onLogout={handleLogout} />
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-xl text-center">
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto mb-4 border border-amber-200">
-              <ShieldAlert className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900 tracking-tight">
-              Password Reset Required
-            </h3>
-            <p className="text-sm text-slate-600 mt-3 leading-relaxed">
-              Your password must be reset by an administrator. Please contact your administrator.
-            </p>
-            <div className="mt-6 pt-4 border-t border-slate-100">
-              <button
-                onClick={handleLogout}
-                className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl text-xs transition shadow-xs"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <ForcePasswordChangeScreen
+        user={currentUser}
+        onPasswordChanged={(updatedUser) => {
+          setCurrentUser(updatedUser);
+          setRefreshTrigger((prev) => prev + 1);
+        }}
+        onLogout={handleLogout}
+      />
     );
   }
 
