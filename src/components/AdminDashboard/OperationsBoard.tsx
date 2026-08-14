@@ -619,9 +619,9 @@ export const OperationsBoard: React.FC<OperationsBoardProps> = ({ summary, today
                       status={
                         isOpen
                           ? 'WORKING'
-                          : rec.attendanceStatus === 'LATE'
+                          : rec.isLate
                           ? 'LATE'
-                          : rec.attendanceStatus === 'AUTO_SIGNED_OUT'
+                          : rec.signOutType === 'AUTO_SIGNED_OUT' || rec.attendanceState === 'AUTO_SIGNED_OUT'
                           ? 'AUTO_SIGNED_OUT'
                           : 'PRESENT'
                       }
@@ -1056,7 +1056,7 @@ export const OperationsBoard: React.FC<OperationsBoardProps> = ({ summary, today
 
             <div className="flex-1 p-6 overflow-y-auto divide-y divide-slate-100">
               {boardData.todayRecords
-                .filter((r) => r.signOutType === 'AUTO_SIGNED_OUT' || r.attendanceStatus === 'AUTO_SIGNED_OUT')
+                .filter((r) => r.signOutType === 'AUTO_SIGNED_OUT' || r.attendanceState === 'AUTO_SIGNED_OUT')
                 .map((rec) => (
                   <div key={rec.recordId || rec.id} className="py-3.5 flex items-center justify-between">
                     <div className="flex items-center space-x-3">

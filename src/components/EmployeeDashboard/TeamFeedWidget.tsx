@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 
 interface TeamFeedWidgetProps {
-  user: User;
+  user?: User | null;
 }
 
 export const TeamFeedWidget: React.FC<TeamFeedWidgetProps> = ({ user }) => {
@@ -49,7 +49,7 @@ export const TeamFeedWidget: React.FC<TeamFeedWidgetProps> = ({ user }) => {
         hour: '2-digit',
       });
       const hour = parseInt(istHourStr, 10);
-      const firstName = user.fullName ? user.fullName.split(' ')[0] : 'Colleague';
+      const firstName = user?.fullName ? user.fullName.split(' ')[0] : 'Colleague';
 
       if (hour >= 5 && hour < 12) {
         return { text: `Good Morning, ${firstName}`, icon: Sunrise, color: 'text-amber-500' };
@@ -61,7 +61,7 @@ export const TeamFeedWidget: React.FC<TeamFeedWidgetProps> = ({ user }) => {
         return { text: `Good Night, ${firstName}`, icon: Moon, color: 'text-indigo-400' };
       }
     } catch {
-      return { text: `Welcome, ${user.fullName || 'Colleague'}`, icon: Sun, color: 'text-amber-500' };
+      return { text: `Welcome, ${user?.fullName || 'Colleague'}`, icon: Sun, color: 'text-amber-500' };
     }
   };
 
@@ -92,8 +92,8 @@ export const TeamFeedWidget: React.FC<TeamFeedWidgetProps> = ({ user }) => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
             <EmployeeAvatar
-              name={user.fullName}
-              imageUrl={user.photoUrl}
+              name={user?.fullName || 'Staff'}
+              imageUrl={user?.photoUrl}
               size="lg"
               className="ring-2 ring-amber-400/40"
             />
@@ -105,7 +105,7 @@ export const TeamFeedWidget: React.FC<TeamFeedWidgetProps> = ({ user }) => {
                 </h1>
               </div>
               <p className="text-xs text-slate-300 mt-0.5 font-medium">
-                {user.designation || 'Staff Member'} &bull; {user.department || 'Milestone Consultancy'}
+                {user?.designation || 'Staff Member'} &bull; {user?.department || 'Milestone Consultancy'}
               </p>
             </div>
           </div>

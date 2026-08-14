@@ -3,10 +3,10 @@ import { AttendanceRecord } from '../../types';
 import { Sun, Moon, Clock, CheckCircle2, Sparkles, Building2, MapPin } from 'lucide-react';
 
 interface TodayShiftListProps {
-  shifts: AttendanceRecord[];
+  shifts?: AttendanceRecord[];
 }
 
-export const TodayShiftList: React.FC<TodayShiftListProps> = ({ shifts }) => {
+export const TodayShiftList: React.FC<TodayShiftListProps> = ({ shifts = [] }) => {
   const formatTime = (isoString?: string | null) => {
     if (!isoString) return '--:--';
     return new Date(isoString).toLocaleTimeString('en-US', {

@@ -99,7 +99,7 @@ export const AuditVault: React.FC = () => {
                     {log.actorId} ({log.actorRole})
                   </td>
                   <td className="py-3.5 px-3 text-slate-600 max-w-md truncate">
-                    {log.targetEntity}: {JSON.stringify(log.details)}
+                    {log.targetId ? `${log.targetId}: ` : ''}{JSON.stringify(log.details)}
                   </td>
                 </tr>
               ))}

@@ -441,7 +441,7 @@ export default function App() {
                 </div>
                 <div className="lg:col-span-5 space-y-6">
                   <TodayShiftList shifts={todayShifts} />
-                  <TeamFeedWidget />
+                  <TeamFeedWidget user={currentUser} />
                 </div>
               </div>
             )}

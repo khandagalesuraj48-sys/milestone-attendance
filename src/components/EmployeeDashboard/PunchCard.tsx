@@ -91,7 +91,8 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   // Update available gate/perimeter locations whenever selected site changes
   useEffect(() => {
     if (selectedSiteId) {
-      const filtered = locations.filter((loc) => loc.siteId === selectedSiteId);
+      const locList = locations || [];
+      const filtered = locList.filter((loc) => loc.siteId === selectedSiteId);
       setSiteLocations(filtered);
       if (filtered.length > 0) {
         setSelectedLocationId(filtered[0].locationId || filtered[0].id || '');
@@ -102,8 +103,8 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   }, [selectedSiteId, locations]);
 
   // Check if today already has a Day shift recorded (making a Night shift eligible as extra)
-  const isNightExtraShiftEligible = todayShifts.some(
-    (s) => s.shiftType === 'DAY' && (s.status === 'PRESENT_FULL_DAY' || s.sessionStatus === 'CLOSED')
+  const isNightExtraShiftEligible = (todayShifts || []).some(
+    (s) => s.shiftType === 'DAY' && (s.attendanceStatus === 'PRESENT_FULL_DAY' || s.sessionStatus === 'CLOSED')
   );
 
   // Instant Verification of Location status against chosen Site Perimeter
@@ -257,8 +258,8 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   const selectedSite = availableSites.find((s) => s.siteId === selectedSiteId);
 
   // Calculate today's total hours logged across all closed/open shifts
-  const todayTotalHours = todayShifts.reduce((acc, curr) => {
-    if (curr.totalWorkingHours) return acc + curr.totalWorkingHours;
+  const todayTotalHours = (todayShifts || []).reduce((acc, curr) => {
+    if (curr.workingMinutes) return acc + (curr.workingMinutes / 60);
     if (curr.sessionStatus === 'OPEN' && curr.signInTime) {
       const diffHrs = Math.max(0, (Date.now() - new Date(curr.signInTime).getTime()) / 3600000);
       return acc + diffHrs;
