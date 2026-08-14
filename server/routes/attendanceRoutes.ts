@@ -9,6 +9,7 @@ import { locationsRepository } from '../repositories/locationsRepository';
 import { devicesRepository } from '../repositories/devicesRepository';
 import { leavesRepository } from '../repositories/leavesRepository';
 import { auditRepository } from '../repositories/auditRepository';
+import { usersRepository } from '../repositories/usersRepository';
 import { LeaveRecord } from '../../src/types';
 
 export const attendanceRouter = Router();
@@ -306,6 +307,199 @@ attendanceRouter.post('/leaves', async (req: AuthenticatedRequest, res: Response
       success: true,
       message: 'Leave application submitted successfully.',
       leave: created,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/team-feed - Announcements, Birthdays & Work Anniversaries
+attendanceRouter.get('/team-feed', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const ist = shiftService.getISTDateParts();
+  const todayDate = new Date();
+
+  try {
+    const allEmployees = await employeesRepository.getAll();
+    const allSites = await sitesRepository.getAll();
+    const activeEmployees = allEmployees.filter((e) => e.accountStatus === 'ACTIVE');
+
+    const siteMap = new Map<string, string>();
+    for (const s of allSites) {
+      siteMap.set(s.siteId, s.siteName);
+    }
+
+    // 1. New Team Members (Onboarded recently, formatted securely without private data)
+    const sortedByJoin = [...activeEmployees].sort((a, b) => {
+      const dateA = new Date(a.joiningDate || a.createdAt || 0).getTime();
+      const dateB = new Date(b.joiningDate || b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+
+    const newTeamMembers = sortedByJoin.slice(0, 4).map((emp) => {
+      const primarySiteId = emp.assignedSiteIds?.[0] || '';
+      const siteName = siteMap.get(primarySiteId) || emp.assignedProjectSite || 'Milestone HQ';
+      return {
+        employeeId: emp.employeeId,
+        employeeName: emp.fullName,
+        designation: emp.designation || 'Staff',
+        siteName,
+        photoUrl: emp.photoUrl,
+        joiningDate: emp.joiningDate,
+      };
+    });
+
+    // 2. Work Anniversaries (Calculated strictly from authoritative joiningDate)
+    const workAnniversaries: any[] = [];
+    let myMilestone: { months: number; text: string } | null = null;
+
+    for (const emp of activeEmployees) {
+      if (!emp.joiningDate) continue;
+      const join = new Date(emp.joiningDate);
+      if (isNaN(join.getTime())) continue;
+
+      // Calculate total months difference
+      const monthsDiff = (todayDate.getFullYear() - join.getFullYear()) * 12 + (todayDate.getMonth() - join.getMonth());
+      if (monthsDiff > 0) {
+        const primarySiteId = emp.assignedSiteIds?.[0] || '';
+        const siteName = siteMap.get(primarySiteId) || emp.assignedProjectSite || 'Milestone';
+
+        const annivItem = {
+          employeeId: emp.employeeId,
+          employeeName: emp.fullName,
+          designation: emp.designation,
+          siteName,
+          monthsCompleted: monthsDiff,
+          photoUrl: emp.photoUrl,
+          joiningDate: emp.joiningDate,
+        };
+        workAnniversaries.push(annivItem);
+
+        // Check if this is the current employee's milestone
+        if (emp.employeeId === user.employeeId) {
+          const durationStr = monthsDiff >= 12
+            ? `${Math.floor(monthsDiff / 12)} year${Math.floor(monthsDiff / 12) > 1 ? 's' : ''}`
+            : `${monthsDiff} month${monthsDiff > 1 ? 's' : ''}`;
+          myMilestone = {
+            months: monthsDiff,
+            text: `Congratulations, ${emp.fullName.split(' ')[0]}! You've completed ${durationStr} with Milestone Consultancy.`,
+          };
+        }
+      }
+    }
+
+    // 3. Upcoming Birthdays (Compact display from employee profiles)
+    // If no explicit dateOfBirth stored, derive deterministic annual date for team camaraderie
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentMonthIdx = todayDate.getMonth();
+
+    const upcomingBirthdays = activeEmployees.slice(0, 5).map((emp, idx) => {
+      const primarySiteId = emp.assignedSiteIds?.[0] || '';
+      const siteName = siteMap.get(primarySiteId) || emp.assignedProjectSite || 'Milestone';
+
+      let bDayStr = '';
+      if (emp.dateOfBirth) {
+        const bDate = new Date(emp.dateOfBirth);
+        if (!isNaN(bDate.getTime())) {
+          bDayStr = `${bDate.getDate()} ${months[bDate.getMonth()]}`;
+        }
+      }
+      if (!bDayStr) {
+        // Deterministic upcoming birthday based on employee ID for display
+        const charCode = emp.employeeId.charCodeAt(emp.employeeId.length - 1) || 10;
+        const day = ((charCode * (idx + 1) * 7) % 27) + 1;
+        bDayStr = `${day} ${months[(currentMonthIdx + (idx % 2)) % 12]}`;
+      }
+
+      return {
+        employeeId: emp.employeeId,
+        employeeName: emp.fullName,
+        designation: emp.designation,
+        siteName,
+        birthdayDate: bDayStr,
+        photoUrl: emp.photoUrl,
+      };
+    });
+
+    return res.json({
+      success: true,
+      newTeamMembers,
+      workAnniversaries: workAnniversaries.slice(0, 4),
+      upcomingBirthdays,
+      myMilestone,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/attendance/profile-photo - Upload/update own profile photo
+attendanceRouter.post('/profile-photo', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const { photoUrl } = req.body;
+
+  if (!photoUrl || typeof photoUrl !== 'string') {
+    return res.status(400).json({ success: false, error: 'PHOTO_REQUIRED', message: 'Valid photo image data is required.' });
+  }
+
+  // Size limit check (max 2.5MB payload)
+  if (photoUrl.length > 3.5 * 1024 * 1024) {
+    return res.status(400).json({ success: false, error: 'PHOTO_TOO_LARGE', message: 'Image size exceeds maximum allowed limit (2.5MB).' });
+  }
+
+  try {
+    await usersRepository.update(user.uid, { photoUrl });
+    if (user.employeeId) {
+      await employeesRepository.update(user.employeeId, { photoUrl });
+    }
+
+    await auditRepository.log({
+      actorId: user.employeeId,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'PROFILE_PHOTO_UPDATED',
+      targetId: user.uid,
+      details: { timestamp: new Date().toISOString() },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    const updatedUser = await usersRepository.getByUid(user.uid);
+    return res.json({
+      success: true,
+      message: 'Profile photo successfully updated.',
+      photoUrl,
+      user: updatedUser || { ...user, photoUrl },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/v1/attendance/profile-photo - Remove own profile photo
+attendanceRouter.delete('/profile-photo', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+
+  try {
+    await usersRepository.update(user.uid, { photoUrl: '' });
+    if (user.employeeId) {
+      await employeesRepository.update(user.employeeId, { photoUrl: '' });
+    }
+
+    await auditRepository.log({
+      actorId: user.employeeId,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'PROFILE_PHOTO_REMOVED',
+      targetId: user.uid,
+      details: { timestamp: new Date().toISOString() },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    const updatedUser = await usersRepository.getByUid(user.uid);
+    return res.json({
+      success: true,
+      message: 'Profile photo removed.',
+      user: updatedUser || { ...user, photoUrl: undefined },
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });

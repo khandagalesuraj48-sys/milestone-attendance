@@ -33,4 +33,14 @@ export const auditRepository = {
       .get();
     return snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as AuditLog));
   },
+
+  async getByTargetId(targetId: string, limitCount: number = 50): Promise<AuditLog[]> {
+    const snap = await adminDb
+      .collection(COLLECTION)
+      .where('targetId', '==', targetId)
+      .orderBy('timestamp', 'desc')
+      .limit(limitCount)
+      .get();
+    return snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as AuditLog));
+  },
 };

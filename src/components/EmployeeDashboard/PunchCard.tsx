@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AttendanceRecord, ShiftType, LocationSite, Site } from '../../types';
+import { AttendanceRecord, ShiftType, LocationSite, Site, User } from '../../types';
 import { api } from '../../lib/api';
 import { getCurrentBrowserLocation, LocationResult } from '../../lib/geo';
 import {
@@ -13,11 +13,13 @@ import {
   Square,
   Building,
   RotateCcw,
-  Sparkles,
   ShieldCheck,
+  Sunrise,
+  Sunset,
 } from 'lucide-react';
 
 interface PunchCardProps {
+  user?: User | null;
   activeSession: AttendanceRecord | null;
   todayShifts: AttendanceRecord[];
   onAttendanceUpdate: () => void;
@@ -28,6 +30,7 @@ interface PunchCardProps {
 type LocationStatusType = 'IDLE' | 'CHECKING' | 'VERIFIED' | 'OUTSIDE' | 'PERMISSION_REQUIRED' | 'UNAVAILABLE';
 
 export const PunchCard: React.FC<PunchCardProps> = ({
+  user,
   activeSession,
   todayShifts,
   onAttendanceUpdate,
@@ -45,6 +48,27 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   // Location status state
   const [locationStatus, setLocationStatus] = useState<LocationStatusType>('IDLE');
   const [locationMessage, setLocationMessage] = useState<string>('');
+
+  // Calculate dynamic greeting
+  const getGreetingText = () => {
+    try {
+      const now = new Date();
+      const istHourStr = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        hour: '2-digit',
+      });
+      const hour = parseInt(istHourStr, 10);
+      const name = user?.fullName ? user.fullName.split(' ')[0] : 'Colleague';
+
+      if (hour >= 5 && hour < 12) return `Good Morning, ${name} 👋`;
+      if (hour >= 12 && hour < 17) return `Good Afternoon, ${name} 👋`;
+      if (hour >= 17 && hour < 21) return `Good Evening, ${name} 👋`;
+      return `Good Night, ${name} 👋`;
+    } catch {
+      return `Welcome, ${user?.fullName || 'Colleague'} 👋`;
+    }
+  };
 
   // Load employee's authorized sites
   useEffect(() => {
@@ -100,7 +124,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
       if (geo.error || !geo.coordinates) {
         if (geo.error?.includes('denied')) {
           setLocationStatus('PERMISSION_REQUIRED');
-          setLocationMessage('Location permission required. Please allow location access to mark attendance.');
+          setLocationMessage('Location permission required. Please enable browser location.');
         } else {
           setLocationStatus('UNAVAILABLE');
           setLocationMessage('GPS signal unavailable. Please ensure location services are enabled.');
@@ -125,10 +149,10 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
         if (distance <= (targetLoc.radiusMeters || 100)) {
           setLocationStatus('VERIFIED');
-          setLocationMessage(`Location Verified • ${targetLoc.locationName || 'Project Site'}`);
+          setLocationMessage(`Location Verified (${targetLoc.locationName || 'Project Site'})`);
         } else {
           setLocationStatus('OUTSIDE');
-          setLocationMessage('Outside Attendance Area. You must be within your assigned site to mark attendance.');
+          setLocationMessage('Outside Attendance Area. Please be at your assigned site location.');
         }
       } else {
         setLocationStatus('VERIFIED');
@@ -161,7 +185,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
       const mins = Math.floor((diffSeconds % 3600) / 60);
       const secs = diffSeconds % 60;
       setElapsedTime(
-        `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+        `${String(hours).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m`
       );
     };
 
@@ -238,35 +262,60 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
   return (
     <div id="punch-card-panel" className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xs text-slate-900">
-      {/* Active Session Display */}
-      {activeSession ? (
-        <div className="mb-6 p-5 sm:p-6 rounded-2xl bg-emerald-50/60 border border-emerald-200">
+      {/* Dynamic Header & Employee Context */}
+      <div className="mb-6 pb-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">
+            {getGreetingText()}
+          </h2>
+          <p className="text-xs text-slate-600 mt-1 font-medium flex items-center space-x-1.5">
+            <span className="font-semibold text-slate-800">{user?.designation || 'Site Staff'}</span>
+            <span>&bull;</span>
+            <span className="text-slate-600">{selectedSite?.siteName || 'Assigned Project Site'}</span>
+          </p>
+        </div>
+
+        {/* Current Attendance Status Badge */}
+        <div>
+          {activeSession ? (
+            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+              <span>Signed In &bull; Working {elapsedTime}</span>
+            </div>
+          ) : (
+            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold text-xs">
+              <span className="w-2 h-2 rounded-full bg-slate-400" />
+              <span>Not yet signed in</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Active Session Detailed Card */}
+      {activeSession && (
+        <div className="mb-6 p-5 rounded-2xl bg-emerald-50/70 border border-emerald-200">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3.5">
               <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-xs shrink-0">
                 <Play className="w-6 h-6 fill-current" />
               </div>
               <div>
                 <div className="flex items-center space-x-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100/80 px-2.5 py-0.5 rounded-md flex items-center space-x-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping mr-1" />
-                    <span>On Shift</span>
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-900 bg-emerald-200/80 px-2 py-0.5 rounded-md">
+                    {activeSession.shiftType} SHIFT ONGOING
                   </span>
                   {activeSession.isExtraShift && (
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-purple-800 bg-purple-100 px-2.5 py-0.5 rounded-md">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-purple-800 bg-purple-100 px-2 py-0.5 rounded-md">
                       Extra Night
                     </span>
                   )}
                 </div>
-                <h3 className="text-lg font-bold text-slate-900 mt-1">
-                  {activeSession.shiftType} Shift &bull; {activeSession.siteNameSnapshot}
+                <h3 className="text-base font-bold text-slate-900 mt-1">
+                  {activeSession.siteNameSnapshot}
                 </h3>
-                <p className="text-xs text-slate-600 mt-0.5 flex items-center space-x-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                  <span>{activeSession.locationNameSnapshot}</span>
-                  <span>&bull;</span>
-                  <span>
-                    Started at{' '}
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Signed In at{' '}
+                  <span className="font-semibold text-slate-900">
                     {new Date(activeSession.signInTime!).toLocaleTimeString('en-US', {
                       timeZone: 'Asia/Kolkata',
                       hour: '2-digit',
@@ -274,34 +323,21 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                       hour12: true,
                     })}{' '}
                     IST
-                  </span>
+                  </span>{' '}
+                  &bull; {activeSession.locationNameSnapshot}
                 </p>
               </div>
             </div>
 
-            <div className="text-left sm:text-right border-t sm:border-t-0 pt-3 sm:pt-0 border-emerald-200/60">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 block">
-                Working Duration
+            <div className="text-left sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-emerald-200">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                Total Time
               </span>
-              <span className="text-2xl sm:text-3xl font-mono font-extrabold text-slate-900 tracking-tight">
+              <span className="text-2xl font-mono font-extrabold text-slate-900 tracking-tight">
                 {elapsedTime}
               </span>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="mb-6 pb-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-xl font-bold tracking-tight text-slate-900">
-              Today's Shift
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Select your shift and assigned project site to record attendance.
-            </p>
-          </div>
-          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-            Ready to Sign In
-          </span>
         </div>
       )}
 
@@ -310,7 +346,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
         <div className="mb-5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start space-x-3">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
           <div>
-            <span className="font-bold block">Action Required:</span>
+            <span className="font-bold block">Notice:</span>
             <span>{error}</span>
           </div>
         </div>
@@ -331,14 +367,14 @@ export const PunchCard: React.FC<PunchCardProps> = ({
         <div className="space-y-5">
           {/* Shift Selection */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
-              Select Shift
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+              Select Today's Shift
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setSelectedShift('DAY')}
-                className={`p-4 rounded-2xl border text-left transition flex items-center justify-between ${
+                className={`p-4 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
                   selectedShift === 'DAY'
                     ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/40 text-slate-900 shadow-xs'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -350,7 +386,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                   </div>
                   <div>
                     <div className="font-bold text-sm text-slate-900">DAY Shift</div>
-                    <div className="text-[11px] text-slate-500">08:00 AM – 05:00 PM</div>
+                    <div className="text-[11px] text-slate-500 font-medium">08:00 AM – 05:00 PM</div>
                   </div>
                 </div>
               </button>
@@ -358,7 +394,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedShift('NIGHT')}
-                className={`p-4 rounded-2xl border text-left transition flex items-center justify-between ${
+                className={`p-4 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
                   selectedShift === 'NIGHT'
                     ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-400/40 text-slate-900 shadow-xs'
                     : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -377,7 +413,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className="text-[11px] text-slate-500">07:00 PM – 04:00 AM</div>
+                    <div className="text-[11px] text-slate-500 font-medium">07:00 PM – 04:00 AM</div>
                   </div>
                 </div>
               </button>
@@ -386,7 +422,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
           {/* Assigned Project Site Selection */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
               Assigned Project Site
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -395,7 +431,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                   key={site.siteId}
                   type="button"
                   onClick={() => setSelectedSiteId(site.siteId)}
-                  className={`p-3.5 rounded-xl border text-left transition flex items-center space-x-3 ${
+                  className={`p-3.5 rounded-xl border text-left transition flex items-center space-x-3 cursor-pointer ${
                     selectedSiteId === site.siteId
                       ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
                       : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -403,7 +439,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                 >
                   <Building className={`w-4 h-4 shrink-0 ${selectedSiteId === site.siteId ? 'text-amber-400' : 'text-slate-400'}`} />
                   <div className="truncate">
-                    <div className="font-semibold text-xs truncate">{site.siteName}</div>
+                    <div className="font-bold text-xs truncate">{site.siteName}</div>
                   </div>
                 </button>
               ))}
@@ -413,8 +449,8 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           {/* Approved Location Selection */}
           {siteLocations.length > 1 && (
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
-                Site Location
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                Site Location / Gate
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {siteLocations.map((loc) => {
@@ -425,14 +461,14 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                       key={locId}
                       type="button"
                       onClick={() => setSelectedLocationId(locId)}
-                      className={`p-3 rounded-xl border text-left transition ${
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${
                         isSelected
                           ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-400/40 text-slate-900'
                           : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                       }`}
                     >
                       <div className="font-bold text-xs text-slate-900">{loc.locationName || loc.name}</div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 truncate">{loc.address || 'Project perimeter'}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5 truncate">{loc.address || 'Authorized Site Perimeter'}</p>
                     </button>
                   );
                 })}
@@ -442,14 +478,14 @@ export const PunchCard: React.FC<PunchCardProps> = ({
         </div>
       )}
 
-      {/* Human-Friendly Location Status Indicator */}
+      {/* Human-Friendly Clean Location Status Indicator */}
       <div className="my-6 p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
         <div className="flex items-center space-x-3">
           {locationStatus === 'CHECKING' && (
             <span className="w-4 h-4 border-2 border-slate-400 border-t-slate-900 rounded-full animate-spin shrink-0" />
           )}
           {locationStatus === 'VERIFIED' && (
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 ring-4 ring-emerald-100 shrink-0" />
           )}
           {locationStatus === 'OUTSIDE' && (
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -459,15 +495,15 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           )}
 
           <div className="text-xs">
-            <span className="font-semibold text-slate-900">
-              {locationStatus === 'VERIFIED' && 'Location Status: Verified'}
-              {locationStatus === 'OUTSIDE' && 'Location Status: Outside Area'}
-              {locationStatus === 'PERMISSION_REQUIRED' && 'Location Access: Permission Required'}
-              {locationStatus === 'CHECKING' && 'Validating Location...'}
-              {(locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && 'Location Status'}
+            <span className="font-bold text-slate-900">
+              {locationStatus === 'VERIFIED' && '● Location Verified'}
+              {locationStatus === 'OUTSIDE' && '⚠ Outside Attendance Area'}
+              {locationStatus === 'PERMISSION_REQUIRED' && 'Location Permission Required'}
+              {locationStatus === 'CHECKING' && 'Checking Location...'}
+              {(locationStatus === 'UNAVAILABLE' || locationStatus === 'IDLE') && 'Location Verification'}
             </span>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              {locationMessage || 'Location is checked when marking attendance.'}
+            <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+              {locationMessage || 'Location is verified on your assigned site.'}
             </p>
           </div>
         </div>
@@ -476,22 +512,23 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           type="button"
           onClick={verifyLocationStatus}
           disabled={locationStatus === 'CHECKING'}
-          className="p-2 rounded-xl text-slate-500 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition text-xs flex items-center space-x-1 shrink-0"
-          title="Re-check Location"
+          className="p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-white border border-transparent hover:border-slate-200 transition text-xs flex items-center space-x-1 shrink-0 font-medium cursor-pointer"
+          title="Re-verify Location"
         >
           <RotateCcw className={`w-3.5 h-3.5 ${locationStatus === 'CHECKING' ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Verify</span>
+          <span className="hidden sm:inline">Check</span>
         </button>
       </div>
 
-      {/* Primary Action Button */}
+      {/* Prominent Primary Action Button */}
       <div className="pt-2">
         {activeSession ? (
           <button
+            id="btn-sign-out"
             type="button"
             onClick={handlePunchOut}
             disabled={loading}
-            className="w-full py-4 px-6 rounded-2xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-base transition flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50"
+            className="w-full py-4 px-6 rounded-2xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-base transition flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50 cursor-pointer"
           >
             {loading ? (
               <span className="flex items-center space-x-2">
@@ -507,10 +544,11 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           </button>
         ) : (
           <button
+            id="btn-sign-in"
             type="button"
             onClick={handlePunchIn}
             disabled={loading}
-            className="w-full py-4 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold text-base transition flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50"
+            className="w-full py-4 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-bold text-base transition flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50 cursor-pointer"
           >
             {loading ? (
               <span className="flex items-center space-x-2">
@@ -521,7 +559,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
               <span className="flex items-center space-x-2">
                 <Play className="w-5 h-5 fill-current text-amber-400" />
                 <span>
-                  SIGN IN &bull; {selectedShift} SHIFT {selectedSite ? `(${selectedSite.siteName})` : ''}
+                  SIGN IN &bull; {selectedShift} SHIFT
                 </span>
               </span>
             )}
@@ -531,12 +569,13 @@ export const PunchCard: React.FC<PunchCardProps> = ({
 
       {/* Policy Footer */}
       <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-        <span className="flex items-center space-x-1.5">
+        <span className="flex items-center space-x-1.5 font-medium">
           <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-          <span>Verified Site Geofence</span>
+          <span>Milestone Verified Geofence</span>
         </span>
-        <span>Standard: 9.0h Full Day / 4.0h Half Day</span>
+        <span className="font-mono">IST Shift Policy</span>
       </div>
     </div>
   );
 };
+

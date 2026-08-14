@@ -12,6 +12,7 @@ import { TodayShiftList } from './components/EmployeeDashboard/TodayShiftList';
 import { MonthlyRegister } from './components/EmployeeDashboard/MonthlyRegister';
 import { LeaveRequestCard } from './components/EmployeeDashboard/LeaveRequestCard';
 import { MyProfile } from './components/EmployeeDashboard/MyProfile';
+import { TeamFeedWidget } from './components/EmployeeDashboard/TeamFeedWidget';
 
 // Admin Components
 import { OperationsBoard } from './components/AdminDashboard/OperationsBoard';
@@ -207,6 +208,8 @@ export default function App() {
         user={currentUser}
         onLogout={handleLogout}
         onProfileClick={() => currentUser.role === 'employee' && setEmpActiveTab('PROFILE')}
+        onSelectTab={(tab) => setEmpActiveTab(tab)}
+        currentTab={empActiveTab}
         onMobileMenuToggle={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMobileMenuOpen={isMobileMenuOpen}
       />
@@ -419,14 +422,16 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 <div className="lg:col-span-7">
                   <PunchCard
+                    user={currentUser}
                     activeSession={activeSession}
                     todayShifts={todayShifts}
                     onAttendanceUpdate={loadEmployeeData}
                     locations={locations}
                   />
                 </div>
-                <div className="lg:col-span-5">
+                <div className="lg:col-span-5 space-y-6">
                   <TodayShiftList shifts={todayShifts} />
+                  <TeamFeedWidget />
                 </div>
               </div>
             )}

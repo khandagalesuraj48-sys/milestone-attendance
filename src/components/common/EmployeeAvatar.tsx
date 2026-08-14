@@ -25,11 +25,17 @@ export const EmployeeAvatar: React.FC<EmployeeAvatarProps> = ({
   className = '',
   imageUrl,
 }) => {
+  const [imgError, setImgError] = React.useState(false);
   const cleanName = name?.trim() || 'Staff';
   const parts = cleanName.split(' ').filter(Boolean);
   const initials = parts.length >= 2 
     ? `${parts[0].charAt(0)}${parts[parts.length - 1].charAt(0)}`.toUpperCase()
     : cleanName.substring(0, 2).toUpperCase();
+
+  // Reset imgError if imageUrl changes
+  React.useEffect(() => {
+    setImgError(false);
+  }, [imageUrl]);
 
   // Deterministic color assignment based on name string
   let hash = 0;
@@ -64,13 +70,16 @@ export const EmployeeAvatar: React.FC<EmployeeAvatarProps> = ({
     INACTIVE: 'bg-slate-300 ring-white',
   };
 
+  const showImage = Boolean(imageUrl && !imgError);
+
   return (
     <div className={`relative inline-flex items-center justify-center shrink-0 select-none ${className}`}>
-      {imageUrl ? (
+      {showImage ? (
         <img
           src={imageUrl}
           alt={cleanName}
-          className={`${sizeClasses[size]} object-cover border border-slate-200/80`}
+          onError={() => setImgError(true)}
+          className={`${sizeClasses[size]} object-cover border border-slate-200/80 shadow-xs`}
           referrerPolicy="no-referrer"
         />
       ) : (

@@ -295,6 +295,51 @@ export const api = {
     return request('/api/v1/attendance/my-profile');
   },
 
+  async getTeamFeed(): Promise<{
+    success: boolean;
+    newTeamMembers: Array<{
+      employeeId: string;
+      employeeName: string;
+      designation: string;
+      siteName: string;
+      photoUrl?: string;
+      joiningDate?: string;
+    }>;
+    upcomingBirthdays: Array<{
+      employeeId: string;
+      employeeName: string;
+      designation: string;
+      siteName: string;
+      birthdayDate: string;
+      photoUrl?: string;
+    }>;
+    workAnniversaries: Array<{
+      employeeId: string;
+      employeeName: string;
+      designation: string;
+      siteName: string;
+      monthsCompleted: number;
+      photoUrl?: string;
+      joiningDate: string;
+    }>;
+    myMilestone: { months: number; text: string } | null;
+  }> {
+    return request('/api/v1/attendance/team-feed');
+  },
+
+  async uploadProfilePhoto(photoUrl: string): Promise<{ success: boolean; photoUrl: string; user: User }> {
+    return request('/api/v1/attendance/profile-photo', {
+      method: 'POST',
+      body: JSON.stringify({ photoUrl }),
+    });
+  },
+
+  async deleteProfilePhoto(): Promise<{ success: boolean; user: User }> {
+    return request('/api/v1/attendance/profile-photo', {
+      method: 'DELETE',
+    });
+  },
+
   // Admin Endpoints
   async getAdminOverview(params?: {
     date?: string;
@@ -397,6 +442,18 @@ export const api = {
     return request(`/api/v1/admin/employees/${id}/reset-device`, {
       method: 'POST',
     });
+  },
+
+  async getDeviceHistory(id: string): Promise<{
+    success: boolean;
+    employeeId: string;
+    employeeName: string;
+    currentStatus: 'BOUND' | 'UNBOUND';
+    unbindCount: number;
+    activeDevice: any;
+    history: any[];
+  }> {
+    return request(`/api/v1/admin/employees/${id}/device-history`);
   },
 
   async getAdminAttendance(params?: {

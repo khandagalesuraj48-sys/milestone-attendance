@@ -33,6 +33,7 @@ export interface User {
   fullName: string;
   department?: string;
   designation?: string;
+  photoUrl?: string;
   createdAt?: string;
   updatedAt?: string;
   lastLoginAt?: string;
@@ -78,6 +79,8 @@ export interface Employee {
   department: string;
   designation: string;
   joiningDate: string;
+  dateOfBirth?: string;
+  photoUrl?: string;
   assignedSiteIds: string[]; // 1..N authorized Sites
   assignedLocationIds?: string[];
   assignedProjectSite?: string;
@@ -86,6 +89,50 @@ export interface Employee {
   activeDeviceId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TeamAnnouncement {
+  id: string;
+  type: 'NEW_MEMBER' | 'ANNIVERSARY' | 'COMPANY';
+  title: string;
+  employeeName?: string;
+  designation?: string;
+  siteName?: string;
+  photoUrl?: string;
+  description?: string;
+  date?: string;
+  milestoneMonths?: number;
+}
+
+export interface UpcomingBirthday {
+  employeeId: string;
+  employeeName: string;
+  designation: string;
+  siteName: string;
+  birthdayDate: string;
+  photoUrl?: string;
+}
+
+export interface WorkAnniversaryItem {
+  employeeId: string;
+  employeeName: string;
+  designation: string;
+  siteName: string;
+  monthsCompleted: number;
+  photoUrl?: string;
+  joiningDate: string;
+}
+
+export interface DeviceHistoryLog {
+  id: string;
+  action: 'BOUND' | 'UNBOUND' | 'RESET';
+  timestamp: string;
+  actorName: string;
+  actorRole: string;
+  deviceModel?: string;
+  userAgent?: string;
+  ipAddress?: string;
+  reason?: string;
 }
 
 export interface DeviceBinding {

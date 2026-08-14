@@ -800,6 +800,70 @@ adminRouter.post('/employees/:id/reset-device', async (req: AuthenticatedRequest
   }
 });
 
+// GET /api/v1/admin/employees/:id/device-history - Visibility into device binding & unbind history
+adminRouter.get('/employees/:id/device-history', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const cleanId = id.toUpperCase().trim();
+
+  try {
+    const employee = await employeesRepository.getById(cleanId);
+    if (!employee) {
+      return res.status(404).json({ success: false, error: 'EMPLOYEE_NOT_FOUND' });
+    }
+
+    const activeDev = await devicesRepository.getActiveByEmployeeId(cleanId);
+    const allDevs = await devicesRepository.getByEmployeeId(cleanId);
+    const auditLogs = await auditRepository.getByTargetId(cleanId);
+
+    // Filter relevant device-related audit events
+    const deviceAudits = auditLogs.filter(
+      (a) => a.action === 'DEVICE_UNBOUND' || a.action === 'DEVICE_RESET' || a.action === 'DEVICE_BOUND' || a.action === 'DEVICE_MISMATCH'
+    );
+
+    const historyItems = [
+      ...allDevs.map((d) => ({
+        id: d.id,
+        action: (d.status === 'REVOKED' ? 'UNBOUND' : 'BOUND') as 'BOUND' | 'UNBOUND' | 'RESET',
+        timestamp: d.registeredAt || d.createdAt || new Date().toISOString(),
+        actorName: d.revokedByAdminId ? 'Administrator' : 'System / Employee',
+        actorRole: d.revokedByAdminId ? 'admin' : 'employee',
+        deviceModel: d.userAgent ? d.userAgent.split(' ')[0] : 'Web Device',
+        userAgent: d.userAgent,
+        ipAddress: d.ipAddress,
+        reason: d.revocationReason || undefined,
+      })),
+      ...deviceAudits.map((a) => ({
+        id: a.id,
+        action: (a.action === 'DEVICE_RESET' || a.action === 'DEVICE_UNBOUND' ? 'UNBOUND' : 'BOUND') as 'BOUND' | 'UNBOUND' | 'RESET',
+        timestamp: a.timestamp,
+        actorName: a.actorName || 'Administrator',
+        actorRole: a.actorRole || 'admin',
+        deviceModel: 'Hardware Binding',
+        userAgent: a.details?.userAgent || 'Standard Client',
+        ipAddress: a.ipAddress,
+        reason: a.details?.reason || (a.action === 'DEVICE_RESET' ? 'Reset by Administrator' : undefined),
+      })),
+    ];
+
+    // Deduplicate and sort descending
+    historyItems.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const unbindCount = historyItems.filter((h) => h.action === 'UNBOUND' || h.action === 'RESET').length;
+
+    return res.json({
+      success: true,
+      employeeId: cleanId,
+      employeeName: employee.fullName,
+      currentStatus: employee.boundHardwareSignature || activeDev ? 'BOUND' : 'UNBOUND',
+      unbindCount,
+      activeDevice: activeDev || null,
+      history: historyItems,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/v1/admin/employees/:id/reset-password - Reset password in Firebase Auth & force change
 adminRouter.post('/employees/:id/reset-password', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;

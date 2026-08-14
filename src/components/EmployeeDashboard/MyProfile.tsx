@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Employee, Site } from '../../types';
 import { api } from '../../lib/api';
+import { EmployeeAvatar } from '../common/EmployeeAvatar';
 import {
   User as UserIcon,
   Shield,
@@ -16,6 +17,9 @@ import {
   Smartphone,
   Eye,
   EyeOff,
+  Camera,
+  Trash2,
+  Upload,
 } from 'lucide-react';
 
 interface MyProfileProps {
@@ -27,6 +31,12 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [assignedSites, setAssignedSites] = useState<Site[]>([]);
   const [loadingProfile, setLoadingProfile] = useState<boolean>(true);
+
+  // Profile Photo State
+  const [photoLoading, setPhotoLoading] = useState<boolean>(false);
+  const [photoError, setPhotoError] = useState<string>('');
+  const [photoSuccess, setPhotoSuccess] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Password Change State
   const [newPassword, setNewPassword] = useState<string>('');
@@ -53,6 +63,64 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
     };
     fetchProfile();
   }, []);
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPhotoError('');
+    setPhotoSuccess('');
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setPhotoError('Please select a valid image file (PNG, JPG, JPEG, WEBP).');
+      return;
+    }
+
+    if (file.size > 3 * 1024 * 1024) {
+      setPhotoError('Image file must be smaller than 3MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64Data = event.target?.result as string;
+      if (!base64Data) return;
+
+      try {
+        setPhotoLoading(true);
+        const res = await api.uploadProfilePhoto(base64Data);
+        if (res.success) {
+          setPhotoSuccess('Profile photo updated successfully.');
+          if (onUserUpdated && res.user) {
+            onUserUpdated(res.user);
+          }
+        }
+      } catch (err: any) {
+        setPhotoError(err.message || 'Failed to upload profile photo.');
+      } finally {
+        setPhotoLoading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemovePhoto = async () => {
+    setPhotoError('');
+    setPhotoSuccess('');
+    try {
+      setPhotoLoading(true);
+      const res = await api.deleteProfilePhoto();
+      if (res.success) {
+        setPhotoSuccess('Profile photo removed.');
+        if (onUserUpdated && res.user) {
+          onUserUpdated(res.user);
+        }
+      }
+    } catch (err: any) {
+      setPhotoError(err.message || 'Failed to remove photo.');
+    } finally {
+      setPhotoLoading(false);
+    }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,8 +164,29 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
       <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-6 border-b border-slate-100">
           <div className="flex items-center space-x-4">
-            <div className="w-16 h-16 rounded-2xl bg-slate-900 text-white flex items-center justify-center text-2xl font-bold tracking-tight shadow-xs">
-              {user.fullName ? user.fullName.charAt(0) : 'U'}
+            <div className="relative group shrink-0">
+              <EmployeeAvatar
+                name={user.fullName || 'User'}
+                imageUrl={user.photoUrl}
+                size="xl"
+                className="shadow-sm"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoLoading}
+                className="absolute bottom-0 right-0 p-1.5 rounded-full bg-slate-900 text-white hover:bg-slate-800 shadow-md transition border-2 border-white cursor-pointer"
+                title="Change Profile Photo"
+              >
+                <Camera className="w-3.5 h-3.5" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoSelect}
+              />
             </div>
             <div>
               <div className="flex items-center space-x-2">
@@ -109,6 +198,30 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
               <p className="text-xs text-slate-500 mt-0.5">
                 {employee?.designation || user.designation || 'Staff Member'} &bull; {user.employeeId}
               </p>
+
+              {/* Photo Actions */}
+              <div className="flex items-center space-x-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={photoLoading}
+                  className="inline-flex items-center space-x-1 text-[11px] font-semibold text-slate-700 hover:text-slate-900 py-1 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 transition"
+                >
+                  <Upload className="w-3 h-3" />
+                  <span>{photoLoading ? 'Uploading...' : 'Upload Photo'}</span>
+                </button>
+                {user.photoUrl && (
+                  <button
+                    type="button"
+                    onClick={handleRemovePhoto}
+                    disabled={photoLoading}
+                    className="inline-flex items-center space-x-1 text-[11px] font-semibold text-rose-600 hover:text-rose-800 py-1 px-2 rounded-lg hover:bg-rose-50 transition"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Remove</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -125,6 +238,20 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
             </span>
           </div>
         </div>
+
+        {photoError && (
+          <div className="mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span>{photoError}</span>
+          </div>
+        )}
+
+        {photoSuccess && (
+          <div className="mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+            <span>{photoSuccess}</span>
+          </div>
+        )}
 
         {/* Read-Only Information Grid */}
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -291,7 +418,7 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
             <button
               type="submit"
               disabled={passwordLoading || !newPassword || !confirmPassword}
-              className="px-6 py-3 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-semibold text-sm rounded-2xl transition shadow-xs disabled:opacity-50 flex items-center space-x-2"
+              className="px-6 py-3 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-semibold text-sm rounded-2xl transition shadow-xs disabled:opacity-50 flex items-center space-x-2 cursor-pointer"
             >
               <Lock className="w-4 h-4" />
               <span>{passwordLoading ? 'Updating Password...' : 'Update Password'}</span>
@@ -302,3 +429,4 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
     </div>
   );
 };
+

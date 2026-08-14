@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 350" width="100%" height="100%">
+  <defs>
+    <linearGradient id="iconBlueGrad" x1="0%" y1="100%" x2="70%" y2="0%">
+      <stop offset="0%" stop-color="#0284C7"/>
+      <stop offset="50%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+    <linearGradient id="iconOrangeGrad" x1="30%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="50%" stop-color="#F97316"/>
+      <stop offset="100%" stop-color="#EA580C"/>
+    </linearGradient>
+    <linearGradient id="iconCenterBlend" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0369A1" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#D97706" stop-opacity="0.8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Left Arch (Cyan to Deep Blue) -->
+  <path
+    d="M 115 250 L 195 125 C 215 95 255 105 270 135 L 320 235 C 328 250 318 268 300 268 L 285 268 C 275 268 265 262 260 252 L 222 175 C 216 163 200 163 194 175 L 140 260 C 132 272 115 272 105 260 C 98 252 98 240 115 215 Z"
+    fill="url(#iconBlueGrad)"
+  />
+
+  <!-- Right Arch (Warm Amber to Orange) -->
+  <path
+    d="M 385 250 L 305 125 C 285 95 245 105 230 135 L 180 235 C 172 250 182 268 200 268 L 215 268 C 225 268 235 262 240 252 L 278 175 C 284 163 300 163 306 175 L 360 260 C 368 272 385 272 395 260 C 402 252 402 240 385 215 Z"
+    fill="url(#iconOrangeGrad)"
+  />
+
+  <!-- Intersecting Center Ribbon Effect -->
+  <path
+    d="M 220 180 C 235 150 265 150 280 180 L 315 250 C 320 260 312 268 300 268 L 275 268 C 265 268 258 262 253 252 L 220 180 Z"
+    fill="url(#iconCenterBlend)"
+    opacity="0.85"
+  />
+</svg>

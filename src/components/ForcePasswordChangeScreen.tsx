@@ -65,17 +65,24 @@ export const ForcePasswordChangeScreen: React.FC<ForcePasswordChangeScreenProps>
   };
 
   return (
-    <div id="force-password-change-screen" className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div id="force-password-change-screen" className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 selection:bg-slate-900 selection:text-white">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         {/* Brand Header */}
-        <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-900 shadow-sm mb-4">
-          <Building2 className="w-7 h-7 text-amber-400" />
+        <div className="flex justify-center mb-4">
+          <div className="w-20 h-20 p-2 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-center justify-center">
+            <img
+              src="/assets/branding/milestone-logo.svg"
+              alt="Milestone Logo"
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+            />
+          </div>
         </div>
-        <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+        <h2 className="text-2xl font-extrabold tracking-tight text-slate-900">
           Milestone Consultancy
         </h2>
-        <p className="mt-1 text-xs text-slate-500 font-medium tracking-wide uppercase">
-          Workforce Attendance & Site Geofence Platform
+        <p className="mt-1 text-xs text-slate-500 font-semibold tracking-wider uppercase">
+          Workforce Attendance & Command Center
         </p>
       </div>
 
