@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { adminAuth } from './firebaseAdmin';
+import { adminAuth, getFirebaseAdminDiagnostics } from './firebaseAdmin';
 import { usersRepository } from './repositories/usersRepository';
 import { User } from '../src/types';
 
@@ -50,7 +50,23 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
     // 2. Fetch user profile from Firestore strictly using verified Firebase UID
     user = await usersRepository.getByUid(decodedToken.uid);
   } catch (err: any) {
-    console.error('[requireAuth] Database error retrieving user profile:', err?.message || 'Unknown database error');
+    const adminDiag = getFirebaseAdminDiagnostics();
+    console.error('[requireAuth] Firestore lookup failed with diagnostic info:', JSON.stringify({
+      errorName: err?.name || 'Error',
+      errorCode: err?.code || 'UNKNOWN',
+      errorMessage: err?.message || 'Unknown database error',
+      errorDetails: err?.details || null,
+      serviceAccountPresent: adminDiag.serviceAccountEnvExists,
+      serviceAccountLength: adminDiag.serviceAccountEnvLength,
+      parseStatus: adminDiag.parseStatus,
+      parseErrorMessage: adminDiag.parseErrorMessage,
+      detectedProjectId: adminDiag.detectedProjectId,
+      initMode: adminDiag.initMode,
+      initErrorMessage: adminDiag.initErrorMessage,
+      hasPrivateKey: adminDiag.hasPrivateKey,
+      hasClientEmail: adminDiag.hasClientEmail,
+      queriedUidLength: decodedToken.uid ? decodedToken.uid.length : 0,
+    }));
     return res.status(500).json({
       success: false,
       error: 'DATABASE_ERROR',
