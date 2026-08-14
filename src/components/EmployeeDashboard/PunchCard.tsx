@@ -420,82 +420,60 @@ export const PunchCard: React.FC<PunchCardProps> = ({
             ------------------------------------------------------------------- */
         <div className="space-y-3.5 sm:space-y-4">
           {/* -------------------------------------------------------------------
-              2. SHIFT SELECTION — REDESIGNED (Compact Horizontal Selector)
+              2. SHIFT SELECTION — COMPACT HORIZONTALLY-ALIGNED TOGGLE
               ------------------------------------------------------------------- */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                Select Shift
-              </span>
+            <div className="flex items-center justify-between mb-1.5 px-0.5">
+              <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                Shift
+              </label>
               {isNightExtraShiftEligible && (
                 <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
-                  Day Completed &bull; Extra Night Eligible
+                  Day Done &bull; Extra Night Eligible
                 </span>
               )}
             </div>
 
-            {/* Horizontal Compact Shift Selector */}
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              {/* DAY Shift */}
+            {/* Compact Horizontally-Aligned Segmented Toggle Control */}
+            <div className="bg-slate-100/90 p-1 rounded-2xl flex items-center gap-1 border border-slate-200/80 shadow-inner w-full">
+              {/* DAY Shift Toggle Item */}
               <button
+                id="shift-toggle-day"
                 type="button"
                 onClick={() => setSelectedShift('DAY')}
-                className={`p-2.5 sm:p-3 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
+                className={`flex-1 py-2 px-2 sm:px-3 rounded-xl transition-all duration-150 flex items-center justify-center space-x-1.5 sm:space-x-2 text-xs sm:text-sm font-bold min-h-[44px] cursor-pointer ${
                   selectedShift === 'DAY'
-                    ? 'bg-amber-50/90 border-amber-400 ring-2 ring-amber-400/40 text-slate-900 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'bg-white text-slate-900 shadow-xs ring-1 ring-slate-200/80 font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50 font-semibold'
                 }`}
               >
-                <div className="flex items-center space-x-2 sm:space-x-2.5 min-w-0">
-                  <div
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                      selectedShift === 'DAY' ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-700'
-                    }`}
-                  >
-                    <Sun className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-bold text-xs sm:text-sm text-slate-900 truncate">DAY SHIFT</div>
-                    <div className="text-[10px] text-slate-500 font-medium truncate">08:00 AM–05:00 PM</div>
-                  </div>
-                </div>
-                {selectedShift === 'DAY' && (
-                  <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0 hidden sm:block" />
-                )}
+                <Sun className={`w-4 h-4 shrink-0 ${selectedShift === 'DAY' ? 'text-amber-500' : 'text-slate-400'}`} />
+                <span>Day</span>
+                <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                  (08:00–17:00)
+                </span>
               </button>
 
-              {/* NIGHT Shift */}
+              {/* NIGHT Shift Toggle Item */}
               <button
+                id="shift-toggle-night"
                 type="button"
                 onClick={() => setSelectedShift('NIGHT')}
-                className={`p-2.5 sm:p-3 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
+                className={`flex-1 py-2 px-2 sm:px-3 rounded-xl transition-all duration-150 flex items-center justify-center space-x-1.5 sm:space-x-2 text-xs sm:text-sm font-bold min-h-[44px] cursor-pointer ${
                   selectedShift === 'NIGHT'
-                    ? 'bg-indigo-50/90 border-indigo-400 ring-2 ring-indigo-400/40 text-slate-900 shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    ? 'bg-white text-slate-900 shadow-xs ring-1 ring-slate-200/80 font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/50 font-semibold'
                 }`}
               >
-                <div className="flex items-center space-x-2 sm:space-x-2.5 min-w-0">
-                  <div
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                      selectedShift === 'NIGHT' ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-700'
-                    }`}
-                  >
-                    <Moon className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-bold text-xs sm:text-sm text-slate-900 flex items-center space-x-1 truncate">
-                      <span className="truncate">NIGHT SHIFT</span>
-                      {isNightExtraShiftEligible && (
-                        <span className="text-[8px] font-extrabold uppercase px-1 py-0.2 rounded bg-purple-100 text-purple-700 shrink-0">
-                          Extra
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] text-slate-500 font-medium truncate">07:00 PM–04:00 AM</div>
-                  </div>
-                </div>
-                {selectedShift === 'NIGHT' && (
-                  <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0 hidden sm:block" />
+                <Moon className={`w-4 h-4 shrink-0 ${selectedShift === 'NIGHT' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                <span>Night</span>
+                <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                  (19:00–04:00)
+                </span>
+                {isNightExtraShiftEligible && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 text-[9px] font-extrabold uppercase shrink-0">
+                    Extra
+                  </span>
                 )}
               </button>
             </div>

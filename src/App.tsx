@@ -15,6 +15,7 @@ import { MyProfile } from './components/EmployeeDashboard/MyProfile';
 import { TeamFeedWidget } from './components/EmployeeDashboard/TeamFeedWidget';
 import { EmployeeMenuDrawer } from './components/EmployeeDashboard/EmployeeMenuDrawer';
 import { NotificationDrawer } from './components/EmployeeDashboard/NotificationDrawer';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 // Admin Components
 import { OperationsBoard } from './components/AdminDashboard/OperationsBoard';
@@ -206,7 +207,7 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-slate-900 selection:text-white">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-slate-900 selection:text-white">
       {/* Authoritative Command Center Header */}
       <Navbar
         user={currentUser}
@@ -243,7 +244,7 @@ export default function App() {
       )}
 
       {/* Main Layout Container */}
-      <div className="flex-1 w-full flex flex-col lg:flex-row">
+      <div className="flex-1 w-full max-w-full overflow-x-hidden flex flex-col lg:flex-row">
         {currentUser.role === 'admin' ? (
           /* =========================================================================
              ADMINISTRATOR PORTAL (ENTERPRISE COMMAND CENTER)
@@ -348,35 +349,37 @@ export default function App() {
             )}
 
             {/* Admin Content Canvas */}
-            <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
-              {adminActiveTab === 'DASHBOARD' && (
-                <OperationsBoard
-                  summary={adminSummary}
-                  todayDate={adminTodayDate}
-                  onRefresh={() => setRefreshTrigger((t) => t + 1)}
-                />
-              )}
+            <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full overflow-x-hidden">
+              <ErrorBoundary componentName="Admin Module" fallbackTitle="Unable to load content">
+                {adminActiveTab === 'DASHBOARD' && (
+                  <OperationsBoard
+                    summary={adminSummary}
+                    todayDate={adminTodayDate}
+                    onRefresh={() => setRefreshTrigger((t) => t + 1)}
+                  />
+                )}
 
-              {adminActiveTab === 'REGISTER' && (
-                <LiveAttendanceRegister
-                  onOpenCorrection={(rec) => setCorrectingRecord(rec)}
-                  refreshTrigger={refreshTrigger}
-                />
-              )}
+                {adminActiveTab === 'REGISTER' && (
+                  <LiveAttendanceRegister
+                    onOpenCorrection={(rec) => setCorrectingRecord(rec)}
+                    refreshTrigger={refreshTrigger}
+                  />
+                )}
 
-              {adminActiveTab === 'EMPLOYEES' && <EmployeeDirectory locations={locations} />}
+                {adminActiveTab === 'EMPLOYEES' && <EmployeeDirectory locations={locations} />}
 
-              {adminActiveTab === 'SITES' && (
-                <SiteManager locations={locations} onRefresh={fetchLocations} />
-              )}
+                {adminActiveTab === 'SITES' && (
+                  <SiteManager locations={locations} onRefresh={fetchLocations} />
+                )}
 
-              {adminActiveTab === 'SECURITY' && <SecurityCenter />}
+                {adminActiveTab === 'SECURITY' && <SecurityCenter />}
 
-              {adminActiveTab === 'POLICY' && <PolicyMaster />}
+                {adminActiveTab === 'POLICY' && <PolicyMaster />}
 
-              {adminActiveTab === 'AUDIT' && <AuditVault />}
+                {adminActiveTab === 'AUDIT' && <AuditVault />}
 
-              {adminActiveTab === 'REPORTS' && <ReportsCenter />}
+                {adminActiveTab === 'REPORTS' && <ReportsCenter />}
+              </ErrorBoundary>
 
               {/* Correction Studio Modal */}
               {correctingRecord && (
@@ -392,10 +395,10 @@ export default function App() {
           </>
         ) : (
           /* =========================================================================
-             EMPLOYEE SELF-SERVICE PORTAL (CLEAN & ELEGANT WORKFORCE EXPERIENCE)
+             EMPLOYEE SELF-SERVICE PORTAL (FOCUSED PUNCH CARD & WORKFORCE EXPERIENCE)
              ========================================================================= */
-          <main className="flex-1 max-w-4xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4">
-            {/* Desktop Quick Tab Navigation Header */}
+          <main className="flex-1 w-full max-w-lg md:max-w-2xl lg:max-w-3xl mx-auto px-3 sm:px-6 py-3.5 sm:py-6 space-y-4 overflow-x-hidden">
+            {/* Desktop / Tablet Quick Switcher Bar (Hidden on Mobile) */}
             <div className="hidden sm:flex items-center justify-between gap-3 pb-1 border-b border-slate-200">
               <div className="flex items-center space-x-1 p-1 bg-white border border-slate-200 rounded-2xl shadow-2xs text-xs font-semibold">
                 <button
@@ -451,7 +454,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Navigation Menu Button */}
+              {/* Navigation Drawer Menu Button */}
               <button
                 type="button"
                 onClick={() => setIsEmployeeMenuOpen(true)}
@@ -462,9 +465,9 @@ export default function App() {
               </button>
             </div>
 
-            {/* Mobile View Active Tab Banner & Back Shortcut */}
+            {/* Mobile View Active Sub-view Header with Return to Shift Button */}
             {empActiveTab !== 'SHIFT' && (
-              <div className="sm:hidden flex items-center justify-between pb-2 border-b border-slate-200">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                 <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                   {empActiveTab === 'HISTORY' && '📅 Monthly Register'}
                   {empActiveTab === 'LEAVE' && '📄 Leave Requests'}
@@ -474,36 +477,71 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setEmpActiveTab('SHIFT')}
-                  className="text-xs font-bold text-amber-600 hover:text-amber-700 flex items-center space-x-1"
+                  className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 hover:bg-amber-100 flex items-center space-x-1 cursor-pointer transition"
                 >
-                  <span>&larr; Back to Shift</span>
+                  <span>&larr; Return to Shift</span>
                 </button>
               </div>
             )}
 
-            {/* Employee Tab Content */}
+            {/* Employee Tab Content Wrapped in Component-Level Error Boundaries */}
             {empActiveTab === 'SHIFT' && (
-              <div className="space-y-4">
-                <PunchCard
-                  user={currentUser}
-                  activeSession={activeSession}
-                  todayShifts={todayShifts}
-                  onAttendanceUpdate={loadEmployeeData}
-                  locations={locations}
-                />
-              </div>
+              <ErrorBoundary
+                componentName="Shift & Attendance (PunchCard)"
+                fallbackTitle="Unable to load content"
+                fallbackMessage="The Shift & Attendance module encountered an unexpected issue. Please retry or reload."
+                onReset={loadEmployeeData}
+              >
+                <div className="w-full">
+                  <PunchCard
+                    user={currentUser}
+                    activeSession={activeSession}
+                    todayShifts={todayShifts}
+                    onAttendanceUpdate={loadEmployeeData}
+                    locations={locations}
+                  />
+                </div>
+              </ErrorBoundary>
             )}
 
-            {empActiveTab === 'HISTORY' && <MonthlyRegister />}
+            {empActiveTab === 'HISTORY' && (
+              <ErrorBoundary
+                componentName="Monthly Register"
+                fallbackTitle="Unable to load content"
+                fallbackMessage="The Monthly Register module could not load. Please retry."
+              >
+                <MonthlyRegister />
+              </ErrorBoundary>
+            )}
 
-            {empActiveTab === 'LEAVE' && <LeaveRequestCard />}
+            {empActiveTab === 'LEAVE' && (
+              <ErrorBoundary
+                componentName="Leave Requests"
+                fallbackTitle="Unable to load content"
+                fallbackMessage="The Leave Requests module could not load. Please retry."
+              >
+                <LeaveRequestCard />
+              </ErrorBoundary>
+            )}
 
             {empActiveTab === 'PROFILE' && (
-              <MyProfile user={currentUser} onUserUpdated={(u) => setCurrentUser(u)} />
+              <ErrorBoundary
+                componentName="My Profile"
+                fallbackTitle="Unable to load content"
+                fallbackMessage="The Profile module could not load. Please retry."
+              >
+                <MyProfile user={currentUser} onUserUpdated={(u) => setCurrentUser(u)} />
+              </ErrorBoundary>
             )}
 
             {empActiveTab === 'TEAM_HIGHLIGHTS' && (
-              <TeamFeedWidget user={currentUser} />
+              <ErrorBoundary
+                componentName="Team Highlights"
+                fallbackTitle="Unable to load content"
+                fallbackMessage="The Team Highlights module could not load. Please retry."
+              >
+                <TeamFeedWidget user={currentUser} />
+              </ErrorBoundary>
             )}
           </main>
         )}
