@@ -89,7 +89,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   useEffect(() => {
     if (selectedSiteId) {
       const locList = locations || [];
-      const filtered = locList.filter((loc) => loc.siteId === selectedSiteId);
+      const filtered = locList.filter((loc) => loc.siteId === selectedSiteId && loc.isActive !== false);
       setSiteLocations(filtered);
       if (filtered.length > 0) {
         setSelectedLocationId(filtered[0].locationId || filtered[0].id || '');

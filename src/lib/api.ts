@@ -13,6 +13,14 @@ import {
   LeaveRecord,
   SecurityEvent,
   AuditLog,
+  PayrollRun,
+  PayrollItem,
+  SalarySlip,
+  ShiftMergeSitePayload,
+  MasterRegisterSummary,
+  MasterRegisterEntry,
+  MasterRegisterStatus,
+  DayWiseAttendanceEntry,
 } from '../types';
 
 const TOKEN_KEY = 'msc_auth_token_v51';
@@ -476,14 +484,6 @@ export const api = {
     return request('/api/v1/admin/leaves/balances');
   },
 
-  async deleteSite(id: string): Promise<any> {
-    return request(`/api/v1/admin/sites/${id}`, { method: 'DELETE' });
-  },
-
-  async deleteLocation(id: string): Promise<any> {
-    return request(`/api/v1/admin/locations/${id}`, { method: 'DELETE' });
-  },
-
   async getMyLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {
     return request('/api/v1/attendance/leaves');
   },
@@ -624,6 +624,26 @@ export const api = {
     });
   },
 
+  async deleteSite(id: string, cascadeOrForce?: boolean): Promise<{ success: boolean; message: string }> {
+    const query = cascadeOrForce ? '?force=true' : '';
+    return request(`/api/v1/admin/sites/${id}${query}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async shiftMergeSites(payload: ShiftMergeSitePayload): Promise<{ success: boolean; message: string; reassignedEmployees: number; reassignedLocations: number }> {
+    return request('/api/v1/admin/sites/shift-merge', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteLocation(id: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/locations/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
   async getEmployees(): Promise<{ success: boolean; employees: any[] }> {
     return request('/api/v1/admin/employees');
   },
@@ -743,4 +763,143 @@ export const api = {
   async triggerSchedulerNight(): Promise<any> {
     return request('/api/v1/internal/auto-sign-out/night', { method: 'POST' });
   },
+
+  // ==========================================
+  // PAYROLL & SALARY SLIP APIs
+  // ==========================================
+
+  async getPayrollRuns(): Promise<{ success: boolean; runs: PayrollRun[] }> {
+    return request('/api/v1/admin/payroll');
+  },
+
+  async generatePayroll(month: string): Promise<{ success: boolean; message: string; run: PayrollRun }> {
+    return request('/api/v1/admin/payroll/generate', {
+      method: 'POST',
+      body: JSON.stringify({ month }),
+    });
+  },
+
+  async getPayrollRun(id: string): Promise<{ success: boolean; run: PayrollRun }> {
+    return request(`/api/v1/admin/payroll/${id}`);
+  },
+
+  async updatePayrollItem(runId: string, itemId: string, payload: any): Promise<{ success: boolean; item: PayrollItem }> {
+    return request(`/api/v1/admin/payroll/${runId}/items/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async finalizePayroll(id: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/payroll/${id}/finalize`, {
+      method: 'POST',
+    });
+  },
+
+  async publishPayroll(id: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/payroll/${id}/publish`, {
+      method: 'POST',
+    });
+  },
+
+  async deletePayroll(id: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/payroll/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getPayrollSlip(itemId: string): Promise<{ success: boolean; slip: SalarySlip }> {
+    return request(`/api/v1/admin/payroll/slips/${itemId}`);
+  },
+
+  async getMySalarySlips(): Promise<{ success: boolean; slips: SalarySlip[] }> {
+    return request('/api/v1/attendance/my-salary-slips');
+  },
+
+  async getMySalarySlip(id: string): Promise<{ success: boolean; slip: SalarySlip }> {
+    return request(`/api/v1/attendance/my-salary-slips/${id}`);
+  },
+
+  // ==========================================
+  // MASTER REGISTER & FINALIZATION APIs
+  // ==========================================
+
+  async getMasterRegister(params?: {
+    month?: string;
+    siteId?: string;
+    department?: string;
+  }): Promise<{ success: boolean; summary: MasterRegisterSummary }> {
+    const query = new URLSearchParams();
+    if (params?.month) query.set('month', params.month);
+    if (params?.siteId && params.siteId !== 'ALL') query.set('siteId', params.siteId);
+    if (params?.department && params.department !== 'ALL') query.set('department', params.department);
+    return request(`/api/v1/admin/master-register?${query.toString()}`);
+  },
+
+  async generateMasterRegister(month: string): Promise<{ success: boolean; message: string; summary: MasterRegisterSummary }> {
+    return request('/api/v1/admin/master-register/generate', {
+      method: 'POST',
+      body: JSON.stringify({ month }),
+    });
+  },
+
+  async updateMasterRegisterEntry(
+    month: string,
+    entryId: string,
+    payload: {
+      adminFinalPresentDays?: number;
+      adminFinalAbsentDays?: number;
+      totalPayableDays?: number;
+      adminNotes?: string;
+    }
+  ): Promise<{ success: boolean; message: string; entry: MasterRegisterEntry }> {
+    return request(`/api/v1/admin/master-register/${month}/entries/${entryId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateMasterRegisterStatus(
+    month: string,
+    status: MasterRegisterStatus
+  ): Promise<{ success: boolean; message: string; summary: MasterRegisterSummary }> {
+    return request(`/api/v1/admin/master-register/${month}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  async getDayWiseAttendance(params?: {
+    month?: string;
+    employeeIds?: string;
+  }): Promise<{
+    success: boolean;
+    month: string;
+    breakdowns: Array<{
+      employeeId: string;
+      employeeName: string;
+      department: string;
+      designation: string;
+      month: string;
+      dayWiseBreakdown: DayWiseAttendanceEntry[];
+      totals: {
+        presentDays: number;
+        absentDays: number;
+        paidLeaves: number;
+        unpaidLeaves: number;
+        holidays: number;
+        holidaysWorked: number;
+        lateMarks: number;
+        halfDays: number;
+        extraNights: number;
+        totalPayableDays: number;
+      };
+    }>;
+  }> {
+    const query = new URLSearchParams();
+    if (params?.month) query.set('month', params.month);
+    if (params?.employeeIds) query.set('employeeIds', params.employeeIds);
+    return request(`/api/v1/admin/attendance/day-wise?${query.toString()}`);
+  },
 };
+

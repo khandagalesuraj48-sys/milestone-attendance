@@ -15,6 +15,7 @@ import { holidaysRepository } from '../repositories/holidaysRepository';
 import { auditRepository } from '../repositories/auditRepository';
 import { usersRepository } from '../repositories/usersRepository';
 import { storageRepository } from '../repositories/storageRepository';
+import { payrollRepository } from '../repositories/payrollRepository';
 import { LeaveRecord, AttendanceRegularizationRequest, AppNotification } from '../../src/types';
 
 export const attendanceRouter = Router();
@@ -641,6 +642,67 @@ attendanceRouter.delete('/profile-photo', async (req: AuthenticatedRequest, res:
   }
 });
 
+// GET /api/v1/attendance/my-salary-slips - Self-service access to published salary slips
+attendanceRouter.get('/my-salary-slips', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  try {
+    const slips = await payrollRepository.getPublishedSlipsForEmployee(user.employeeId);
+    return res.json({ success: true, slips });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/my-salary-slips/:id - Self-service access to specific slip details
+attendanceRouter.get('/my-salary-slips/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const { id } = req.params;
+  try {
+    const slip = await payrollRepository.getSlipById(id);
+    if (!slip) return res.status(404).json({ success: false, error: 'SLIP_NOT_FOUND' });
+    
+    // Security check: Employee can ONLY access their own salary slip
+    if (user.role === 'employee' && slip.employeeId !== user.employeeId) {
+      return res.status(403).json({ success: false, error: 'UNAUTHORIZED_ACCESS', message: 'You are not authorized to view this salary slip.' });
+    }
+
+    return res.json({ success: true, slip });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/my-salary-slips - Self-service access to published salary slips
+attendanceRouter.get('/my-salary-slips', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  try {
+    const slips = await payrollRepository.getPublishedSlipsForEmployee(user.employeeId);
+    return res.json({ success: true, slips });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/my-salary-slips/:id - Self-service access to specific slip details
+attendanceRouter.get('/my-salary-slips/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const { id } = req.params;
+  try {
+    const slip = await payrollRepository.getSlipById(id);
+    if (!slip) return res.status(404).json({ success: false, error: 'SLIP_NOT_FOUND' });
+    
+    // Security check: Employee can ONLY access their own salary slip
+    if (user.role === 'employee' && slip.employeeId !== user.employeeId) {
+      return res.status(403).json({ success: false, error: 'UNAUTHORIZED_ACCESS', message: 'You are not authorized to view this salary slip.' });
+    }
+
+    return res.json({ success: true, slip });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
 
 // GET /api/v1/attendance/team-feed - Announcements, Birthdays & Work Anniversaries
 attendanceRouter.get('/team-feed', async (req: AuthenticatedRequest, res: Response) => {
@@ -851,6 +913,36 @@ attendanceRouter.delete('/profile-photo', async (req: AuthenticatedRequest, res:
       message: 'Profile photo removed.',
       user: updatedUser || { ...user, photoUrl: undefined },
     });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/my-salary-slips - Self-service access to published salary slips
+attendanceRouter.get('/my-salary-slips', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  try {
+    const slips = await payrollRepository.getPublishedSlipsForEmployee(user.employeeId);
+    return res.json({ success: true, slips });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/my-salary-slips/:id - Self-service access to specific slip details
+attendanceRouter.get('/my-salary-slips/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const { id } = req.params;
+  try {
+    const slip = await payrollRepository.getSlipById(id);
+    if (!slip) return res.status(404).json({ success: false, error: 'SLIP_NOT_FOUND' });
+    
+    // Security check: Employee can ONLY access their own salary slip
+    if (user.role === 'employee' && slip.employeeId !== user.employeeId) {
+      return res.status(403).json({ success: false, error: 'UNAUTHORIZED_ACCESS', message: 'You are not authorized to view this salary slip.' });
+    }
+
+    return res.json({ success: true, slip });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

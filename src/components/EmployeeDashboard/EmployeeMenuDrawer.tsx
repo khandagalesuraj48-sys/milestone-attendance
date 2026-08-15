@@ -12,6 +12,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Building,
+  Banknote,
 } from 'lucide-react';
 
 interface EmployeeMenuDrawerProps {
@@ -19,7 +20,7 @@ interface EmployeeMenuDrawerProps {
   onClose: () => void;
   user: User | null;
   currentTab: string;
-  onSelectTab: (tab: 'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS') => void;
+  onSelectTab: (tab: 'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS' | 'SLIPS') => void;
   onLogout: () => void;
   siteName?: string;
 }
@@ -49,6 +50,13 @@ export const EmployeeMenuDrawer: React.FC<EmployeeMenuDrawerProps> = ({
       description: 'Monthly calendar, day units & overtime',
       icon: Calendar,
       color: 'text-blue-500 bg-blue-50 border-blue-200',
+    },
+    {
+      id: 'SLIPS' as const,
+      label: 'Salary Slips',
+      description: 'Monthly vouchers, net pay & earnings',
+      icon: Banknote,
+      color: 'text-emerald-600 bg-emerald-50 border-emerald-200',
     },
     {
       id: 'LEAVE' as const,

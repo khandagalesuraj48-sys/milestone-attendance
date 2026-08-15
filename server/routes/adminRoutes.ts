@@ -15,9 +15,12 @@ import { holidaysRepository } from '../repositories/holidaysRepository';
 import { policyRepository } from '../repositories/policyRepository';
 import { securityRepository } from '../repositories/securityRepository';
 import { auditRepository } from '../repositories/auditRepository';
+import { payrollRepository } from '../repositories/payrollRepository';
+import { masterRegisterRepository } from '../repositories/masterRegisterRepository';
 import { deviceService } from '../services/deviceService';
 import { shiftService } from '../services/shiftService';
-import { Site, LocationSite, Employee, AttendanceStatus, AttendanceCorrection, Holiday } from '../../src/types';
+import { payrollService, convertNumberToIndianWords } from '../services/payrollService';
+import { Site, LocationSite, Employee, AttendanceStatus, AttendanceCorrection, Holiday, PayrollRun, PayrollItem, SalaryStructure, MasterRegisterEntry, MasterRegisterSummary, MasterRegisterStatus, DayWiseAttendanceEntry } from '../../src/types';
 
 export const adminRouter = Router();
 
@@ -266,6 +269,154 @@ adminRouter.put('/sites/:id', async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
+// POST /api/v1/admin/sites/shift-merge - Shift/Merge employees and locations from one project to another
+adminRouter.post('/sites/shift-merge', async (req: AuthenticatedRequest, res: Response) => {
+  const { sourceSiteId, targetSiteId, shiftEmployees = true, shiftLocations = true, deactivateSourceSiteAfterShift = false } = req.body;
+
+  if (!sourceSiteId || !targetSiteId) {
+    return res.status(400).json({
+      success: false,
+      error: 'MISSING_SITES',
+      message: 'Both sourceSiteId and targetSiteId are required for shift/merge.',
+    });
+  }
+
+  if (sourceSiteId === targetSiteId) {
+    return res.status(400).json({
+      success: false,
+      error: 'SAME_SITE',
+      message: 'Source site and target site cannot be the same.',
+    });
+  }
+
+  try {
+    const sourceSite = await sitesRepository.getById(sourceSiteId);
+    const targetSite = await sitesRepository.getById(targetSiteId);
+
+    if (!sourceSite || !targetSite) {
+      return res.status(404).json({
+        success: false,
+        error: 'SITE_NOT_FOUND',
+        message: 'Source or target project site was not found.',
+      });
+    }
+
+    let employeesShiftedCount = 0;
+    let locationsShiftedCount = 0;
+
+    // 1. Shift employees
+    if (shiftEmployees) {
+      const allEmployees = await employeesRepository.getAll();
+      for (const emp of allEmployees) {
+        if (emp.assignedSiteIds && emp.assignedSiteIds.includes(sourceSiteId)) {
+          // Replace sourceSiteId with targetSiteId if not already present
+          const newAssignedSiteIds = emp.assignedSiteIds.filter((sId) => sId !== sourceSiteId);
+          if (!newAssignedSiteIds.includes(targetSiteId)) {
+            newAssignedSiteIds.push(targetSiteId);
+          }
+          await employeesRepository.update(emp.employeeId, {
+            assignedSiteIds: newAssignedSiteIds,
+          });
+          employeesShiftedCount++;
+        }
+      }
+    }
+
+    // 2. Shift geofence locations
+    if (shiftLocations) {
+      const allLocations = await locationsRepository.getAll();
+      for (const loc of allLocations) {
+        if (loc.siteId === sourceSiteId) {
+          await locationsRepository.update(loc.locationId, {
+            siteId: targetSiteId,
+            siteName: targetSite.siteName,
+          });
+          locationsShiftedCount++;
+        }
+      }
+    }
+
+    // 3. Deactivate source site if requested
+    if (deactivateSourceSiteAfterShift) {
+      await sitesRepository.update(sourceSiteId, { isActive: false });
+    }
+
+    // 4. Audit Log
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'PROJECT_SHIFT_MERGE',
+      targetId: `${sourceSiteId}->${targetSiteId}`,
+      details: {
+        sourceSiteName: sourceSite.siteName,
+        targetSiteName: targetSite.siteName,
+        employeesShiftedCount,
+        locationsShiftedCount,
+        deactivateSourceSiteAfterShift,
+      },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Successfully shifted ${employeesShiftedCount} employees and ${locationsShiftedCount} locations from ${sourceSite.siteName} to ${targetSite.siteName}.`,
+      employeesShiftedCount,
+      locationsShiftedCount,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/v1/admin/sites/:id - Delete / Deactivate Site with Dependency Check
+adminRouter.delete('/sites/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { force } = req.query;
+
+  try {
+    const site = await sitesRepository.getById(id);
+    if (!site) return res.status(404).json({ success: false, error: 'SITE_NOT_FOUND' });
+
+    // Check dependencies
+    const allEmployees = await employeesRepository.getAll();
+    const assignedEmps = allEmployees.filter((e) => e.assignedSiteIds && e.assignedSiteIds.includes(id));
+    
+    const allLocations = await locationsRepository.getAll();
+    const assignedLocs = allLocations.filter((l) => l.siteId === id && l.isActive !== false);
+
+    if ((assignedEmps.length > 0 || assignedLocs.length > 0) && force !== 'true') {
+      return res.status(409).json({
+        success: false,
+        error: 'PROJECT_HAS_DEPENDENCIES',
+        message: `Cannot delete project "${site.siteName}" directly. It has ${assignedEmps.length} assigned employee(s) and ${assignedLocs.length} active location(s). Please shift them to another project or confirm forced deactivation.`,
+        assignedEmployeesCount: assignedEmps.length,
+        assignedLocationsCount: assignedLocs.length,
+        canForce: true,
+      });
+    }
+
+    await sitesRepository.update(id, { isActive: false });
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'SITE_DEACTIVATED',
+      targetId: id,
+      details: { siteName: site.siteName, forced: force === 'true' },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Project site "${site.siteName}" has been successfully deactivated.`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/v1/admin/locations
 adminRouter.get('/locations', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -410,14 +561,17 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
     department,
     designation,
     joiningDate,
+    dateOfBirth,
+    reportingManagerId,
+    salaryStructure,
     assignedSiteIds,
   } = req.body;
 
-  if (!employeeId || !username || !initialPassword || !fullName || !mobile || !email || !department || !designation) {
+  if (!employeeId || !username || !initialPassword || !fullName || !mobile || !email || !department || !designation || !joiningDate) {
     return res.status(400).json({
       success: false,
       error: 'MISSING_REQUIRED_FIELDS',
-      message: 'All core employee profile fields and initial temporary password are required.',
+      message: 'All core employee profile fields (including mandatory Joining Date) and initial temporary password are required.',
     });
   }
 
@@ -511,6 +665,12 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
         accountStatus: 'ACTIVE' as const,
       };
 
+      let repManagerName: string | null = null;
+      if (reportingManagerId) {
+        const mgr = await employeesRepository.getById(String(reportingManagerId));
+        if (mgr) repManagerName = mgr.fullName;
+      }
+
       const nowIso = new Date().toISOString();
       const newEmp: Employee = {
         employeeId: cleanEmpId,
@@ -521,6 +681,10 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
         department: String(department).trim(),
         designation: String(designation).trim(),
         joiningDate: joiningDate || shiftService.getISTDateParts().dateStr,
+        dateOfBirth: dateOfBirth ? String(dateOfBirth).trim() : undefined,
+        reportingManagerId: reportingManagerId ? String(reportingManagerId).trim().toUpperCase() : null,
+        reportingManagerName: repManagerName,
+        salaryStructure: salaryStructure || undefined,
         accountStatus: 'ACTIVE',
         assignedSiteIds: validSiteIds,
         boundHardwareSignature: null,
@@ -649,6 +813,9 @@ adminRouter.put('/employees/:id', async (req: AuthenticatedRequest, res: Respons
       assignedProjectSite,
       accountStatus,
       joiningDate,
+      dateOfBirth,
+      reportingManagerId,
+      salaryStructure,
     } = req.body;
 
     const newEmpId = newEmpIdRaw ? String(newEmpIdRaw).toUpperCase().trim() : cleanId;
@@ -720,6 +887,16 @@ adminRouter.put('/employees/:id', async (req: AuthenticatedRequest, res: Respons
       });
     }
 
+    let repManagerName: string | null = existingEmployee.reportingManagerName || null;
+    if (reportingManagerId !== undefined) {
+      if (reportingManagerId) {
+        const mgr = await employeesRepository.getById(String(reportingManagerId));
+        repManagerName = mgr ? mgr.fullName : null;
+      } else {
+        repManagerName = null;
+      }
+    }
+
     // Prepare updated employee payload
     const updatedEmployeeData: Employee = {
       ...existingEmployee,
@@ -735,6 +912,10 @@ adminRouter.put('/employees/:id', async (req: AuthenticatedRequest, res: Respons
       assignedProjectSite: assignedProjectSite !== undefined ? String(assignedProjectSite).trim() : existingEmployee.assignedProjectSite,
       accountStatus: accountStatus && ['ACTIVE', 'SUSPENDED', 'INACTIVE'].includes(accountStatus) ? accountStatus : existingEmployee.accountStatus || 'ACTIVE',
       joiningDate: joiningDate || existingEmployee.joiningDate || new Date().toISOString().split('T')[0],
+      dateOfBirth: dateOfBirth !== undefined ? (dateOfBirth ? String(dateOfBirth).trim() : undefined) : existingEmployee.dateOfBirth,
+      reportingManagerId: reportingManagerId !== undefined ? (reportingManagerId ? String(reportingManagerId).trim().toUpperCase() : null) : existingEmployee.reportingManagerId,
+      reportingManagerName: repManagerName,
+      salaryStructure: salaryStructure !== undefined ? salaryStructure : existingEmployee.salaryStructure,
       updatedAt: new Date().toISOString(),
     };
 
@@ -1555,31 +1736,7 @@ adminRouter.delete('/holidays/:id', async (req: AuthenticatedRequest, res: Respo
   }
 });
 
-// Delete Project Site safely
-adminRouter.delete('/sites/:id', async (req: AuthenticatedRequest, res: Response) => {
-  const { id } = req.params;
-  try {
-    const site = await sitesRepository.getById(id);
-    if (!site) return res.status(404).json({ success: false, error: 'SITE_NOT_FOUND' });
-
-    await sitesRepository.update(id, { isActive: false });
-    await auditRepository.log({
-      actorId: req.user!.employeeId,
-      actorName: req.user!.fullName,
-      actorRole: 'admin',
-      action: 'SITE_DEACTIVATED',
-      targetId: id,
-      details: { siteName: site.siteName },
-      ipAddress: req.ip || '127.0.0.1',
-    });
-
-    return res.json({ success: true, message: `Project site "${site.siteName}" has been deactivated.` });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Delete Geofence Location safely
+// Delete Geofence Location safely with employee reference cleanup
 adminRouter.delete('/locations/:id', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   try {
@@ -1587,17 +1744,366 @@ adminRouter.delete('/locations/:id', async (req: AuthenticatedRequest, res: Resp
     if (!loc) return res.status(404).json({ success: false, error: 'LOCATION_NOT_FOUND' });
 
     await locationsRepository.update(id, { isActive: false });
+
+    // Clean up stale location reference from employees
+    const allEmployees = await employeesRepository.getAll();
+    let cleanedEmpsCount = 0;
+    for (const emp of allEmployees) {
+      if (emp.assignedLocationIds && emp.assignedLocationIds.includes(id)) {
+        const newLocIds = emp.assignedLocationIds.filter((locId) => locId !== id);
+        await employeesRepository.update(emp.employeeId, {
+          assignedLocationIds: newLocIds,
+        });
+        cleanedEmpsCount++;
+      }
+    }
+
     await auditRepository.log({
       actorId: req.user!.employeeId,
       actorName: req.user!.fullName,
       actorRole: 'admin',
       action: 'LOCATION_DEACTIVATED',
       targetId: id,
-      details: { locationName: loc.locationName },
+      details: { locationName: loc.locationName, cleanedEmpsCount },
       ipAddress: req.ip || '127.0.0.1',
     });
 
-    return res.json({ success: true, message: `Location "${loc.locationName}" has been deactivated.` });
+    return res.json({ success: true, message: `Location "${loc.locationName}" has been deactivated and removed from ${cleanedEmpsCount} employee profiles.` });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// PAYROLL ENGINE API ROUTES (ADMIN ONLY)
+// ==========================================
+
+// GET /api/v1/admin/payroll - List all payroll runs
+adminRouter.get('/payroll', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const runs = await payrollRepository.getAllRuns();
+    return res.json({ success: true, runs });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/admin/payroll/generate - Generate draft payroll for a target month
+adminRouter.post('/payroll/generate', async (req: AuthenticatedRequest, res: Response) => {
+  const { month } = req.body;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_MONTH',
+      message: 'A valid month in YYYY-MM format is required.',
+    });
+  }
+
+  try {
+    // Check if payroll run already exists for this month
+    const existingRun = await payrollRepository.getRunByMonth(month);
+    if (existingRun && existingRun.status === 'PUBLISHED') {
+      return res.status(400).json({
+        success: false,
+        error: 'PAYROLL_ALREADY_PUBLISHED',
+        message: `Payroll for ${month} has already been published to employees. It cannot be regenerated.`,
+      });
+    }
+
+    const allEmployees = await employeesRepository.getAll();
+    const activeEmployees = allEmployees.filter((e) => e.accountStatus !== 'SUSPENDED');
+
+    if (activeEmployees.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'NO_EMPLOYEES',
+        message: 'No active employees found to generate payroll.',
+      });
+    }
+
+    const allRecords = await attendanceRepository.queryRecords({});
+    const allLeaves = await leavesRepository.getAll();
+    const allHolidays = await holidaysRepository.getAll();
+    const masterReg = await masterRegisterRepository.getByMonth(month);
+
+    const runId = existingRun ? existingRun.id : `run_${month}_${Date.now()}`;
+    const items: PayrollItem[] = [];
+
+    for (const emp of activeEmployees) {
+      let item: PayrollItem;
+      const regEntry = masterReg?.entries.find((e) => e.employeeId === emp.employeeId);
+
+      if (regEntry) {
+        item = payrollService.calculateItemFromMasterRegister({
+          employee: emp,
+          entry: regEntry,
+          payrollRunId: runId,
+        });
+      } else {
+        item = payrollService.calculateItem({
+          employee: emp,
+          month,
+          payrollRunId: runId,
+          records: allRecords,
+          leaves: allLeaves,
+          holidays: allHolidays,
+        });
+      }
+      items.push(item);
+    }
+
+    const totalGrossAmount = items.reduce((sum, it) => sum + it.totalGrossEarned, 0);
+    const totalDeductionsAmount = items.reduce((sum, it) => sum + it.totalDeductions, 0);
+    const totalNetAmount = items.reduce((sum, it) => sum + it.netSalary, 0);
+
+    const nowIso = new Date().toISOString();
+    const run: PayrollRun = {
+      id: runId,
+      month,
+      status: 'DRAFT',
+      totalEmployees: items.length,
+      totalGrossAmount,
+      totalDeductionsAmount,
+      totalNetAmount,
+      generatedByAdminId: req.user!.employeeId,
+      generatedByAdminName: req.user!.fullName,
+      finalizedAt: null,
+      publishedAt: null,
+      createdAt: existingRun ? existingRun.createdAt : nowIso,
+      updatedAt: nowIso,
+    };
+
+    const savedRun = await payrollRepository.saveRun(run, items);
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'PAYROLL_GENERATED',
+      targetId: runId,
+      details: {
+        month,
+        totalEmployees: items.length,
+        totalNetAmount,
+      },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Payroll draft generated for ${month} across ${items.length} employees.`,
+      run: savedRun,
+    });
+  } catch (err: any) {
+    console.error('Failed to generate payroll:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/admin/payroll/:id - Get specific payroll run with items
+adminRouter.get('/payroll/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const run = await payrollRepository.getRunById(id);
+    if (!run) return res.status(404).json({ success: false, error: 'PAYROLL_RUN_NOT_FOUND' });
+    return res.json({ success: true, run });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/v1/admin/payroll/:id/items/:itemId - Update adjustments on an individual employee payroll item
+adminRouter.put('/payroll/:id/items/:itemId', async (req: AuthenticatedRequest, res: Response) => {
+  const { id, itemId } = req.params;
+  const {
+    incentivesBonus,
+    extraNightBonus,
+    otherAllowances,
+    otherDeductions,
+    tdsDeduction,
+    remarks,
+    paymentStatus,
+    paidOn,
+  } = req.body;
+
+  try {
+    const run = await payrollRepository.getRunById(id);
+    if (!run) return res.status(404).json({ success: false, error: 'PAYROLL_RUN_NOT_FOUND' });
+    if (run.status === 'PUBLISHED') {
+      return res.status(400).json({ success: false, error: 'PAYROLL_LOCKED', message: 'Cannot edit items on a published payroll run.' });
+    }
+
+    const currentItem = (run.items || []).find((it) => it.id === itemId);
+    if (!currentItem) return res.status(404).json({ success: false, error: 'ITEM_NOT_FOUND' });
+
+    const newIncentives = typeof incentivesBonus === 'number' ? incentivesBonus : currentItem.incentivesBonus;
+    const newExtraNight = typeof extraNightBonus === 'number' ? extraNightBonus : currentItem.extraNightBonus;
+    const newOtherAllowances = typeof otherAllowances === 'number' ? otherAllowances : currentItem.earnedOtherAllowances;
+    const newOtherDeductions = typeof otherDeductions === 'number' ? otherDeductions : currentItem.otherDeductions;
+    const newTds = typeof tdsDeduction === 'number' ? tdsDeduction : currentItem.tdsDeduction;
+
+    const totalGrossEarned =
+      currentItem.earnedBasic +
+      currentItem.earnedHra +
+      currentItem.earnedConveyance +
+      currentItem.earnedMedical +
+      currentItem.earnedSpecialAllowance +
+      newOtherAllowances +
+      newExtraNight +
+      newIncentives;
+
+    const totalDeductions = currentItem.pfDeduction + currentItem.ptDeduction + newTds + newOtherDeductions;
+    const netSalary = Math.max(0, totalGrossEarned - totalDeductions);
+    const netSalaryInWords = convertNumberToIndianWords(netSalary);
+
+    const updates: Partial<PayrollItem> = {
+      incentivesBonus: newIncentives,
+      extraNightBonus: newExtraNight,
+      earnedOtherAllowances: newOtherAllowances,
+      otherDeductions: newOtherDeductions,
+      tdsDeduction: newTds,
+      totalGrossEarned,
+      totalDeductions,
+      netSalary,
+      netSalaryInWords,
+      remarks: remarks !== undefined ? remarks : currentItem.remarks,
+      paymentStatus: paymentStatus || currentItem.paymentStatus,
+      paidOn: paidOn !== undefined ? paidOn : currentItem.paidOn,
+    };
+
+    const updatedItem = await payrollRepository.updateItem(id, itemId, updates);
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'PAYROLL_ITEM_UPDATED',
+      targetId: itemId,
+      details: { runId: id, employeeId: currentItem.employeeId, netSalary },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, item: updatedItem });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/admin/payroll/:id/finalize - Finalize payroll run
+adminRouter.post('/payroll/:id/finalize', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const run = await payrollRepository.getRunById(id);
+    if (!run) return res.status(404).json({ success: false, error: 'PAYROLL_RUN_NOT_FOUND' });
+
+    const nowIso = new Date().toISOString();
+    await payrollRepository.updateRun(id, {
+      status: 'FINALIZED',
+      finalizedAt: nowIso,
+      finalizedBy: req.user!.fullName,
+    });
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'PAYROLL_FINALIZED',
+      targetId: id,
+      details: { month: run.month, totalNetAmount: run.totalNetAmount },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, message: `Payroll for ${run.month} has been finalized.` });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/admin/payroll/:id/publish - Publish salary slips to employees
+adminRouter.post('/payroll/:id/publish', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const run = await payrollRepository.getRunById(id);
+    if (!run) return res.status(404).json({ success: false, error: 'PAYROLL_RUN_NOT_FOUND' });
+
+    const nowIso = new Date().toISOString();
+    await payrollRepository.updateRun(id, {
+      status: 'PUBLISHED',
+      publishedAt: nowIso,
+      publishedBy: req.user!.fullName,
+    });
+
+    // Send notification to all employees in this run
+    if (run.items) {
+      for (const item of run.items) {
+        await notificationsRepository.create({
+          id: `NOTIF_PAY_${item.id}_${Date.now()}`,
+          employeeId: item.employeeId,
+          type: 'ANNOUNCEMENT',
+          title: `Salary Slip Published - ${run.month}`,
+          message: `Your salary slip for ${run.month} (Net: ₹${item.netSalary.toLocaleString('en-IN')}) is now available in your profile.`,
+          date: nowIso.split('T')[0],
+          read: false,
+          actionType: 'OPEN_DRAWER',
+          createdAt: nowIso,
+        });
+      }
+    }
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'PAYROLL_PUBLISHED',
+      targetId: id,
+      details: { month: run.month, totalEmployees: run.totalEmployees, totalNetAmount: run.totalNetAmount },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Salary slips for ${run.month} published successfully to ${run.totalEmployees} employees.`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/v1/admin/payroll/:id - Discard draft payroll run
+adminRouter.delete('/payroll/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const run = await payrollRepository.getRunById(id);
+    if (!run) return res.status(404).json({ success: false, error: 'PAYROLL_RUN_NOT_FOUND' });
+    if (run.status === 'PUBLISHED') {
+      return res.status(400).json({ success: false, error: 'CANNOT_DELETE_PUBLISHED', message: 'Published payroll runs cannot be deleted.' });
+    }
+
+    await payrollRepository.deleteRun(id);
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'PAYROLL_DRAFT_DELETED',
+      targetId: id,
+      details: { month: run.month },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, message: `Payroll draft for ${run.month} deleted.` });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/admin/payroll/slips/:itemId - Get salary slip data
+adminRouter.get('/payroll/slips/:itemId', async (req: AuthenticatedRequest, res: Response) => {
+  const { itemId } = req.params;
+  try {
+    const slip = await payrollRepository.getSlipById(itemId);
+    if (!slip) return res.status(404).json({ success: false, error: 'SLIP_NOT_FOUND' });
+    return res.json({ success: true, slip });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1680,3 +2186,340 @@ adminRouter.get('/reports', async (req: AuthenticatedRequest, res: Response) => 
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// ==========================================================
+// MASTER REGISTER & ATTENDANCE FINALIZATION API (ADMIN ONLY)
+// ==========================================================
+
+// GET /api/v1/admin/master-register - Get Master Register summary and entries with optional site/dept filter
+adminRouter.get('/master-register', async (req: AuthenticatedRequest, res: Response) => {
+  const { month, siteId, department } = req.query;
+  const targetMonth = month ? String(month) : shiftService.getISTDateParts().yearMonth;
+
+  try {
+    let summary = await masterRegisterRepository.getByMonth(targetMonth);
+
+    // If summary doesn't exist yet, automatically calculate draft register
+    if (!summary) {
+      const allEmployees = await employeesRepository.getAll();
+      const activeEmployees = allEmployees.filter((e) => e.accountStatus !== 'SUSPENDED');
+      const allSites = await sitesRepository.getAll();
+      const allRecords = await attendanceRepository.queryRecords({});
+      const allLeaves = await leavesRepository.getAll();
+      const allHolidays = await holidaysRepository.getAll();
+
+      const entries: MasterRegisterEntry[] = [];
+
+      for (const emp of activeEmployees) {
+        const site = allSites.find((s) => emp.assignedSiteIds?.includes(s.siteId));
+        const entry = payrollService.calculateMasterRegisterEntry({
+          employee: emp,
+          month: targetMonth,
+          records: allRecords,
+          leaves: allLeaves,
+          holidays: allHolidays,
+          siteName: site?.siteName || emp.assignedProjectSite,
+        });
+        entries.push(entry);
+      }
+
+      const totalPayableDays = entries.reduce((sum, e) => sum + e.totalPayableDays, 0);
+      const nowIso = new Date().toISOString();
+
+      const newSummary: MasterRegisterSummary = {
+        month: targetMonth,
+        status: 'DRAFT',
+        totalEmployees: entries.length,
+        finalizedCount: 0,
+        totalPayableDays,
+        submittedAt: null,
+        submittedBy: null,
+        finalizedAt: null,
+        finalizedBy: null,
+        reopenedAt: null,
+        reopenedBy: null,
+        entries,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+
+      summary = await masterRegisterRepository.saveSummary(newSummary);
+    }
+
+    // Apply filtering if provided
+    let filteredEntries = summary.entries || [];
+    if (department && department !== 'ALL') {
+      filteredEntries = filteredEntries.filter((e) => e.department === String(department));
+    }
+    if (siteId && siteId !== 'ALL') {
+      filteredEntries = filteredEntries.filter((e) => e.siteId === String(siteId));
+    }
+
+    return res.json({
+      success: true,
+      summary: {
+        ...summary,
+        entries: filteredEntries,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Master Register Error]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/admin/master-register/generate - Re-sync / generate fresh Master Register calculations
+adminRouter.post('/master-register/generate', async (req: AuthenticatedRequest, res: Response) => {
+  const { month } = req.body;
+  const targetMonth = month ? String(month) : shiftService.getISTDateParts().yearMonth;
+
+  try {
+    const existing = await masterRegisterRepository.getByMonth(targetMonth);
+    if (existing && existing.status === 'FINALIZED') {
+      return res.status(400).json({
+        success: false,
+        error: 'ALREADY_FINALIZED',
+        message: `Master Register for ${targetMonth} is FINALIZED and locked. Reopen it to recalculate.`,
+      });
+    }
+
+    const allEmployees = await employeesRepository.getAll();
+    const activeEmployees = allEmployees.filter((e) => e.accountStatus !== 'SUSPENDED');
+    const allSites = await sitesRepository.getAll();
+    const allRecords = await attendanceRepository.queryRecords({});
+    const allLeaves = await leavesRepository.getAll();
+    const allHolidays = await holidaysRepository.getAll();
+
+    const entries: MasterRegisterEntry[] = [];
+
+    for (const emp of activeEmployees) {
+      const site = allSites.find((s) => emp.assignedSiteIds?.includes(s.siteId));
+      const entry = payrollService.calculateMasterRegisterEntry({
+        employee: emp,
+        month: targetMonth,
+        records: allRecords,
+        leaves: allLeaves,
+        holidays: allHolidays,
+        siteName: site?.siteName || emp.assignedProjectSite,
+      });
+
+      // Preserve previous admin adjustments if re-generating draft
+      if (existing) {
+        const prevEntry = existing.entries.find((pe) => pe.employeeId === emp.employeeId);
+        if (prevEntry && prevEntry.adminNotes) {
+          entry.adminNotes = prevEntry.adminNotes;
+        }
+      }
+
+      entries.push(entry);
+    }
+
+    const totalPayableDays = entries.reduce((sum, e) => sum + e.totalPayableDays, 0);
+    const nowIso = new Date().toISOString();
+
+    const summaryData: MasterRegisterSummary = {
+      month: targetMonth,
+      status: existing ? existing.status : 'DRAFT',
+      totalEmployees: entries.length,
+      finalizedCount: 0,
+      totalPayableDays,
+      submittedAt: existing?.submittedAt || null,
+      submittedBy: existing?.submittedBy || null,
+      finalizedAt: null,
+      finalizedBy: null,
+      reopenedAt: existing?.reopenedAt || null,
+      reopenedBy: existing?.reopenedBy || null,
+      entries,
+      createdAt: existing?.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+
+    const saved = await masterRegisterRepository.saveSummary(summaryData);
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'MASTER_REGISTER_SYNCED',
+      targetId: targetMonth,
+      details: { month: targetMonth, totalEmployees: entries.length, totalPayableDays },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Master Register recalculated successfully for ${targetMonth} across ${entries.length} employees.`,
+      summary: saved,
+    });
+  } catch (err: any) {
+    console.error('Error generating master register:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/v1/admin/master-register/:month/entries/:entryId - Admin attendance modification on Master Register
+adminRouter.put('/master-register/:month/entries/:entryId', async (req: AuthenticatedRequest, res: Response) => {
+  const { month, entryId } = req.params;
+  const {
+    adminFinalPresentDays,
+    adminFinalAbsentDays,
+    totalPayableDays,
+    adminNotes,
+  } = req.body;
+
+  try {
+    const summary = await masterRegisterRepository.getByMonth(month);
+    if (!summary) {
+      return res.status(404).json({ success: false, error: 'REGISTER_NOT_FOUND', message: 'Master Register not found.' });
+    }
+
+    if (summary.status === 'FINALIZED') {
+      return res.status(400).json({
+        success: false,
+        error: 'LOCKED',
+        message: 'Master Register is finalized. Reopen it before making modifications.',
+      });
+    }
+
+    const currentEntry = summary.entries.find((e) => e.id === entryId);
+    if (!currentEntry) {
+      return res.status(404).json({ success: false, error: 'ENTRY_NOT_FOUND', message: 'Employee register entry not found.' });
+    }
+
+    const updates: Partial<MasterRegisterEntry> = {
+      adminFinalPresentDays: typeof adminFinalPresentDays === 'number' ? adminFinalPresentDays : currentEntry.adminFinalPresentDays,
+      adminFinalAbsentDays: typeof adminFinalAbsentDays === 'number' ? adminFinalAbsentDays : currentEntry.adminFinalAbsentDays,
+      totalPayableDays: typeof totalPayableDays === 'number' ? totalPayableDays : currentEntry.totalPayableDays,
+      adminNotes: adminNotes !== undefined ? String(adminNotes).trim() : currentEntry.adminNotes,
+      lastModifiedByAdminId: req.user!.employeeId,
+      lastModifiedByAdminName: req.user!.fullName,
+      lastModifiedAt: new Date().toISOString(),
+    };
+
+    const updatedEntry = await masterRegisterRepository.updateEntry(month, entryId, updates);
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'MASTER_REGISTER_ENTRY_OVERRIDE',
+      targetId: entryId,
+      details: {
+        month,
+        employeeId: currentEntry.employeeId,
+        previousPayableDays: currentEntry.totalPayableDays,
+        newPayableDays: updates.totalPayableDays,
+        adminNotes: updates.adminNotes,
+      },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Attendance adjustments saved for ${currentEntry.employeeName}.`,
+      entry: updatedEntry,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/admin/master-register/:month/status - Status transition (SUBMITTED / FINALIZED / REOPENED)
+adminRouter.post('/master-register/:month/status', async (req: AuthenticatedRequest, res: Response) => {
+  const { month } = req.params;
+  const { status } = req.body;
+
+  if (!status || !['DRAFT', 'SUBMITTED', 'FINALIZED', 'REOPENED'].includes(status)) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_STATUS',
+      message: 'Status must be one of: DRAFT, SUBMITTED, FINALIZED, REOPENED',
+    });
+  }
+
+  try {
+    const updatedSummary = await masterRegisterRepository.updateStatus(
+      month,
+      status as MasterRegisterStatus,
+      req.user!.employeeId,
+      req.user!.fullName
+    );
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: `MASTER_REGISTER_${status}`,
+      targetId: month,
+      details: { month, status, adminName: req.user!.fullName },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Master Register status for ${month} changed to ${status}.`,
+      summary: updatedSummary,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/admin/attendance/day-wise - Day-wise attendance breakdown for employee(s) and month
+adminRouter.get('/attendance/day-wise', async (req: AuthenticatedRequest, res: Response) => {
+  const { month, employeeIds } = req.query;
+  const targetMonth = month ? String(month) : shiftService.getISTDateParts().yearMonth;
+
+  try {
+    const allEmployees = await employeesRepository.getAll();
+    const allRecords = await attendanceRepository.queryRecords({});
+    const allLeaves = await leavesRepository.getAll();
+    const allHolidays = await holidaysRepository.getAll();
+
+    let targetEmployees = allEmployees;
+    if (employeeIds && typeof employeeIds === 'string' && employeeIds !== 'ALL') {
+      const idList = employeeIds.split(',').map((s) => s.trim().toUpperCase());
+      targetEmployees = targetEmployees.filter((e) => idList.includes(e.employeeId));
+    }
+
+    const breakdowns = targetEmployees.map((emp) => {
+      const entry = payrollService.calculateMasterRegisterEntry({
+        employee: emp,
+        month: targetMonth,
+        records: allRecords,
+        leaves: allLeaves,
+        holidays: allHolidays,
+      });
+
+      return {
+        employeeId: emp.employeeId,
+        employeeName: emp.fullName,
+        department: emp.department,
+        designation: emp.designation,
+        month: targetMonth,
+        dayWiseBreakdown: entry.dayWiseBreakdown || [],
+        totals: {
+          presentDays: entry.actualPresentDays,
+          absentDays: entry.actualAbsentDays,
+          paidLeaves: entry.paidLeaves,
+          unpaidLeaves: entry.unpaidLeaves,
+          holidays: entry.holidays,
+          holidaysWorked: entry.holidaysWorked,
+          lateMarks: entry.lateMarksCount,
+          halfDays: entry.halfDaysCount,
+          extraNights: entry.extraNightsCount,
+          totalPayableDays: entry.totalPayableDays,
+        },
+      };
+    });
+
+    return res.json({
+      success: true,
+      month: targetMonth,
+      breakdowns,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+

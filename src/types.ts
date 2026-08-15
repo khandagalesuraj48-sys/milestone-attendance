@@ -68,6 +68,51 @@ export type LocationSite = Location & {
   name?: string;
 };
 
+export interface BankDetails {
+  bankName?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+  panNumber?: string;
+  uanNumber?: string;
+}
+
+export interface SalaryStructure {
+  monthlyGross: number;
+  monthlyGrossCtc?: number; // Alias for monthlyGross
+  basicSalary: number;
+  hra: number;
+  specialAllowance: number;
+  conveyanceAllowance?: number;
+  medicalAllowance?: number;
+  otherAllowances?: number;
+  
+  // Deductions Config
+  pfApplicable?: boolean;
+  pfDeductionType?: 'PERCENTAGE' | 'FIXED' | 'EXEMPT';
+  pfPercentage?: number;
+  pfRatePercent?: number; // default 12
+  pfFixedAmount?: number;
+  ptApplicable?: boolean; // Professional Tax
+  ptDeductionEnabled?: boolean;
+  ptState?: string;
+  ptStateSlab?: string;
+  ptFixedAmount?: number;
+  tdsMonthly?: number;
+  tdsMonthlyAmount?: number;
+  otherDeductions?: number;
+  
+  // Bank & Tax Details
+  effectiveFrom?: string;
+  bankDetails?: BankDetails;
+  bankName?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+  panNumber?: string;
+  uanNumber?: string;
+  pfNumber?: string;
+  paymentMode?: 'BANK_TRANSFER' | 'CHEQUE' | 'CASH';
+}
+
 export interface Employee {
   id?: string;
   uid?: string;
@@ -80,6 +125,9 @@ export interface Employee {
   designation: string;
   joiningDate: string;
   dateOfBirth?: string;
+  reportingManagerId?: string | null;
+  reportingManagerName?: string | null;
+  salaryStructure?: SalaryStructure;
   photoUrl?: string;
   assignedSiteIds: string[]; // 1..N authorized Sites
   assignedLocationIds?: string[];
@@ -441,3 +489,199 @@ export interface AuditLog {
   ipAddress: string;
   timestamp: string;
 }
+
+export type PayrollStatus = 'DRAFT' | 'FINALIZED' | 'PUBLISHED';
+
+export type MasterRegisterStatus = 'DRAFT' | 'SUBMITTED' | 'FINALIZED' | 'REOPENED';
+
+export interface DayWiseAttendanceEntry {
+  date: string; // YYYY-MM-DD
+  dayName: string; // Mon, Tue, etc.
+  status: AttendanceStatus | 'PRESENT' | 'HOLIDAY_WORKED' | 'REST_DAY';
+  shiftType?: ShiftType;
+  isExtraShift?: boolean;
+  signInTime?: string | null;
+  signOutTime?: string | null;
+  workingMinutes?: number;
+  isLate?: boolean;
+  isRegularized?: boolean;
+  notes?: string;
+}
+
+export interface MasterRegisterEntry {
+  id: string; // unique ID e.g. mr_2026-08_EMP001
+  month: string; // YYYY-MM
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  designation: string;
+  siteId?: string;
+  siteName?: string;
+  joiningDate?: string;
+  
+  totalDaysInMonth: number;
+  totalWorkingDays: number;
+  
+  // Attendance metrics (Actual vs Final)
+  actualPresentDays: number;
+  actualAbsentDays: number;
+  adminFinalPresentDays: number;
+  adminFinalAbsentDays: number;
+  
+  paidLeaves: number;
+  unpaidLeaves: number;
+  leaveBalance: number;
+  holidays: number;
+  holidaysWorked: number;
+  weeklyOffs: number;
+  lateMarksCount: number;
+  halfDaysCount: number;
+  extraDaysCount: number;
+  extraNightsCount: number;
+  totalPayableDays: number;
+  
+  status: MasterRegisterStatus;
+  adminNotes?: string;
+  lastModifiedByAdminId?: string;
+  lastModifiedByAdminName?: string;
+  lastModifiedAt?: string;
+  dayWiseBreakdown?: DayWiseAttendanceEntry[];
+}
+
+export interface MasterRegisterSummary {
+  month: string; // YYYY-MM
+  status: MasterRegisterStatus;
+  totalEmployees: number;
+  finalizedCount: number;
+  totalPayableDays: number;
+  submittedAt?: string | null;
+  submittedBy?: string | null;
+  finalizedAt?: string | null;
+  finalizedBy?: string | null;
+  reopenedAt?: string | null;
+  reopenedBy?: string | null;
+  entries: MasterRegisterEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SalaryStructureVersion extends SalaryStructure {
+  versionId: string;
+  employeeId: string;
+  effectiveFrom: string; // YYYY-MM-DD
+  effectiveTo?: string | null; // YYYY-MM-DD or null for active
+  createdByAdminId: string;
+  createdAt: string;
+}
+
+export interface PayrollItem {
+  id: string;
+  payrollRunId: string;
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  designation: string;
+  joiningDate?: string;
+  bankName?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+  panNumber?: string;
+  uanNumber?: string;
+  
+  month: string; // YYYY-MM
+  totalDaysInMonth: number;
+  workingDaysInMonth: number;
+  
+  // Attendance Breakdown
+  presentFullDays: number;
+  presentHalfDays: number;
+  paidLeaves: number;
+  unpaidLeaves: number;
+  weeklyOffs: number;
+  paidHolidays: number;
+  absentDays: number;
+  lateDays: number;
+  lateDeductionDays: number;
+  extraNightShifts: number;
+  extraNightAllowanceRate?: number;
+  
+  paidDays: number;
+  lopDays: number;
+  
+  // Fixed Structure
+  grossSalary: number;
+  basicSalary: number;
+  hra: number;
+  specialAllowance: number;
+  conveyanceAllowance: number;
+  medicalAllowance: number;
+  otherAllowances: number;
+  
+  // Earned Prorated Components
+  earnedBasic: number;
+  earnedHra: number;
+  earnedSpecialAllowance: number;
+  earnedConveyance: number;
+  earnedMedical: number;
+  earnedOtherAllowances: number;
+  extraNightBonus: number;
+  incentivesBonus: number;
+  totalGrossEarned: number;
+  
+  // Deductions
+  pfDeduction: number;
+  ptDeduction: number;
+  tdsDeduction: number;
+  otherDeductions: number;
+  totalDeductions: number;
+  
+  // Net
+  netSalary: number;
+  netSalaryInWords: string;
+  
+  paymentStatus: 'UNPAID' | 'PAID' | 'ON_HOLD';
+  paidOn?: string;
+  remarks?: string;
+  publishedAt?: string;
+  publishedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PayrollRun {
+  id: string;
+  month: string; // YYYY-MM
+  status: PayrollStatus;
+  totalEmployees: number;
+  totalGrossAmount: number;
+  totalDeductionsAmount: number;
+  totalNetAmount: number;
+  generatedByAdminId: string;
+  generatedByAdminName: string;
+  finalizedAt?: string | null;
+  finalizedBy?: string | null;
+  publishedAt?: string | null;
+  publishedBy?: string | null;
+  items?: PayrollItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SalarySlip extends PayrollItem {
+  companyName: string;
+  companyAddress: string;
+  companyLogoUrl?: string;
+  slipNumber: string;
+}
+
+export interface ProjectShiftParams {
+  sourceSiteId: string;
+  targetSiteId: string;
+  shiftEmployees: boolean;
+  shiftLocations: boolean;
+  deactivateSourceSiteAfterShift: boolean;
+}
+
+export type ShiftMergeSitePayload = ProjectShiftParams;
+
+

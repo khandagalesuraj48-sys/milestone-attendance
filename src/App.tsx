@@ -11,6 +11,7 @@ import { AutoSignOutNotice } from './components/EmployeeDashboard/AutoSignOutNot
 import { TodayShiftList } from './components/EmployeeDashboard/TodayShiftList';
 import { MonthlyRegister } from './components/EmployeeDashboard/MonthlyRegister';
 import { LeaveRequestCard } from './components/EmployeeDashboard/LeaveRequestCard';
+import { MySalarySlips } from './components/EmployeeDashboard/MySalarySlips';
 import { MyProfile } from './components/EmployeeDashboard/MyProfile';
 import { TeamFeedWidget } from './components/EmployeeDashboard/TeamFeedWidget';
 import { EmployeeMenuDrawer } from './components/EmployeeDashboard/EmployeeMenuDrawer';
@@ -20,6 +21,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 // Admin Components
 import { OperationsBoard } from './components/AdminDashboard/OperationsBoard';
 import { LiveAttendanceRegister } from './components/AdminDashboard/LiveAttendanceRegister';
+import { PayrollEngine } from './components/AdminDashboard/PayrollEngine';
 import { EmployeeDirectory } from './components/AdminDashboard/EmployeeDirectory';
 import { CorrectionStudioModal } from './components/AdminDashboard/CorrectionStudioModal';
 import { SiteManager } from './components/AdminDashboard/SiteManager';
@@ -45,6 +47,7 @@ import {
   ChevronRight,
   Activity,
   Sliders,
+  Banknote,
 } from 'lucide-react';
 
 export default function App() {
@@ -55,13 +58,13 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<AttendanceRecord | null>(null);
   const [todayShifts, setTodayShifts] = useState<AttendanceRecord[]>([]);
   const [autoSignOutNotice, setAutoSignOutNotice] = useState<any>(null);
-  const [empActiveTab, setEmpActiveTab] = useState<'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS'>('SHIFT');
+  const [empActiveTab, setEmpActiveTab] = useState<'SHIFT' | 'HISTORY' | 'SLIPS' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS'>('SHIFT');
   const [isEmployeeMenuOpen, setIsEmployeeMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   // Admin State
   const [adminActiveTab, setAdminActiveTab] = useState<
-    'DASHBOARD' | 'REGISTER' | 'EMPLOYEES' | 'SITES' | 'ACCESS' | 'LEAVES' | 'HOLIDAYS' | 'SECURITY' | 'POLICY' | 'AUDIT' | 'REPORTS'
+    'DASHBOARD' | 'REGISTER' | 'PAYROLL' | 'EMPLOYEES' | 'SITES' | 'ACCESS' | 'LEAVES' | 'HOLIDAYS' | 'SECURITY' | 'POLICY' | 'AUDIT' | 'REPORTS'
   >('DASHBOARD');
   const [adminSummary, setAdminSummary] = useState<Record<string, number>>({});
   const [adminTodayDate, setAdminTodayDate] = useState<string>('');
@@ -208,6 +211,7 @@ export default function App() {
       items: [
         { id: 'DASHBOARD', label: 'Operations Board', icon: Clock, badge: 'LIVE' },
         { id: 'REGISTER', label: 'Live Muster Register', icon: FileSpreadsheet },
+        { id: 'PAYROLL', label: 'Payroll & Salary Slips', icon: Banknote, badge: 'PRO' },
         { id: 'EMPLOYEES', label: 'Staff Workforce', icon: Users },
         { id: 'SITES', label: 'Projects & Locations', icon: MapPin },
         { id: 'ACCESS', label: 'Site Access Manager', icon: Layers },
@@ -396,6 +400,8 @@ export default function App() {
                   />
                 )}
 
+                {adminActiveTab === 'PAYROLL' && <PayrollEngine />}
+
                 {adminActiveTab === 'EMPLOYEES' && <EmployeeDirectory locations={locations} />}
 
                 {adminActiveTab === 'SITES' && (
@@ -470,6 +476,19 @@ export default function App() {
                 </button>
 
                 <button
+                  id="tab-emp-slips"
+                  onClick={() => setEmpActiveTab('SLIPS')}
+                  className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
+                    empActiveTab === 'SLIPS'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <Banknote className="w-3.5 h-3.5" />
+                  <span>Salary Slips</span>
+                </button>
+
+                <button
                   id="tab-emp-leave"
                   onClick={() => setEmpActiveTab('LEAVE')}
                   className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
@@ -512,6 +531,7 @@ export default function App() {
               <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                 <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                   {empActiveTab === 'HISTORY' && '📅 Monthly Register'}
+                  {empActiveTab === 'SLIPS' && '💵 Salary Slips'}
                   {empActiveTab === 'LEAVE' && '📄 Leave Requests'}
                   {empActiveTab === 'PROFILE' && '👤 My Profile'}
                   {empActiveTab === 'TEAM_HIGHLIGHTS' && '🌟 Team Highlights'}
@@ -553,6 +573,16 @@ export default function App() {
                 fallbackMessage="The Monthly Register module could not load. Please retry."
               >
                 <MonthlyRegister />
+              </ErrorBoundary>
+            )}
+
+            {empActiveTab === 'SLIPS' && (
+              <ErrorBoundary
+                componentName="Salary Slips"
+                fallbackTitle="Unable to load content"
+                fallbackMessage="The Salary Slips module could not load. Please retry."
+              >
+                <MySalarySlips />
               </ErrorBoundary>
             )}
 
