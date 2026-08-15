@@ -8,12 +8,16 @@ import { locationsRepository } from '../repositories/locationsRepository';
 import { devicesRepository } from '../repositories/devicesRepository';
 import { attendanceRepository } from '../repositories/attendanceRepository';
 import { leavesRepository } from '../repositories/leavesRepository';
+import { leaveLedgerRepository } from '../repositories/leaveLedgerRepository';
+import { regularizationRepository } from '../repositories/regularizationRepository';
+import { notificationsRepository } from '../repositories/notificationsRepository';
+import { holidaysRepository } from '../repositories/holidaysRepository';
 import { policyRepository } from '../repositories/policyRepository';
 import { securityRepository } from '../repositories/securityRepository';
 import { auditRepository } from '../repositories/auditRepository';
 import { deviceService } from '../services/deviceService';
 import { shiftService } from '../services/shiftService';
-import { Site, LocationSite, Employee, AttendanceStatus, AttendanceCorrection } from '../../src/types';
+import { Site, LocationSite, Employee, AttendanceStatus, AttendanceCorrection, Holiday } from '../../src/types';
 
 export const adminRouter = Router();
 
@@ -1043,7 +1047,7 @@ adminRouter.put('/rules', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// Leaves Review
+// Leaves Review & Ledger
 adminRouter.get('/leaves', async (req: AuthenticatedRequest, res: Response) => {
   try {
     const list = await leavesRepository.getAll();
@@ -1053,22 +1057,155 @@ adminRouter.get('/leaves', async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
+adminRouter.get('/leaves/balances', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const employees = await employeesRepository.getAll();
+    const balances = await Promise.all(
+      employees.map(async (emp) => {
+        return await leaveLedgerRepository.getBalance(emp.employeeId, emp.fullName, emp.department);
+      })
+    );
+    return res.json({ success: true, balances });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 adminRouter.patch('/leaves/:id/review', async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { status, reviewComment } = req.body;
 
+  if (!['APPROVED', 'REJECTED'].includes(status)) {
+    return res.status(400).json({ success: false, error: 'INVALID_STATUS', message: 'Status must be APPROVED or REJECTED.' });
+  }
+
   try {
     const leave = await leavesRepository.getById(id);
-    if (!leave) return res.status(404).json({ success: false, error: 'LEAVE_NOT_FOUND' });
+    if (!leave) return res.status(404).json({ success: false, error: 'LEAVE_NOT_FOUND', message: 'Leave request not found.' });
+
+    let paidDays = 0;
+    let unpaidDays = 0;
+
+    if (status === 'APPROVED') {
+      // 1. Calculate eligible leave days (total days minus any official company holidays in range)
+      // Note: Sunday is treated as a normal working day per organizational policy.
+      const holidaysInRange = await holidaysRepository.getHolidaysInRange(leave.startDate, leave.endDate);
+      const holidayDates = new Set(holidaysInRange.map((h) => h.date));
+
+      // Count all active calendar days in range that are not holidays
+      const start = new Date(leave.startDate);
+      const end = new Date(leave.endDate);
+      const dayList: string[] = [];
+      const curr = new Date(start);
+
+      while (curr <= end) {
+        const dStr = curr.toISOString().split('T')[0];
+        dayList.push(dStr);
+        curr.setDate(curr.getDate() + 1);
+      }
+
+      const eligibleDays = dayList.filter((d) => !holidayDates.has(d)).length;
+
+      // 2. Transactionally apply deduction from leave balance
+      const deduction = await leaveLedgerRepository.applyLeaveDeduction(
+        leave.employeeId,
+        eligibleDays,
+        id,
+        reviewComment || `Approved Leave Request (${leave.startDate} to ${leave.endDate})`
+      );
+
+      paidDays = deduction.paidDays;
+      unpaidDays = deduction.unpaidDays;
+
+      // 3. Retrospective Attendance adjustments:
+      // Update any existing attendance record on those dates or insert a clean LEAVE marker
+      for (const dStr of dayList) {
+        if (holidayDates.has(dStr)) continue; // Skip company holidays
+
+        const existingRecords = await attendanceRepository.getByEmployeeAndDate(leave.employeeId, dStr);
+        if (existingRecords.length > 0) {
+          for (const rec of existingRecords) {
+            const recId = rec.recordId || rec.id;
+            if (recId) {
+              await attendanceRepository.update(recId, {
+                attendanceStatus: 'LEAVE',
+                sessionStatus: 'CLOSED',
+                isCorrected: true,
+                adminCorrectionReason: `Approved Leave (${leave.leaveType}) - ${id}`,
+                adminCorrectionBy: req.user!.fullName,
+                adminCorrectionAt: new Date().toISOString(),
+              });
+            }
+          }
+        } else {
+          // Create placeholder LEAVE record so muster register reflects leave
+          const newRecordId = `att_leave_${leave.employeeId}_${dStr}`;
+          await attendanceRepository.create({
+            recordId: newRecordId,
+            id: newRecordId,
+            employeeId: leave.employeeId,
+            employeeNameSnapshot: leave.employeeName || leave.employeeId,
+            department: leave.department || 'Operations',
+            siteId: 'SITE_LEAVE',
+            siteNameSnapshot: 'Authorized Leave',
+            locationId: 'LOC_LEAVE',
+            locationNameSnapshot: 'Authorized Leave',
+            shiftType: 'DAY',
+            attendanceDate: dStr,
+            businessDate: dStr,
+            signInTime: null,
+            signOutTime: null,
+            signOutReason: null,
+            workingMinutes: 0,
+            attendanceState: 'NOT_SIGNED_IN',
+            sessionStatus: 'CLOSED',
+            attendanceStatus: 'LEAVE',
+            isLate: false,
+            isExtraShift: false,
+            extraShiftType: null,
+            isCorrected: true,
+            activeCorrectionId: null,
+            adminCorrectionReason: `Approved Leave (${leave.leaveType}) - ${id}`,
+            adminCorrectionBy: req.user!.fullName,
+            adminCorrectionAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
 
     const updates = {
       status,
+      paidDays,
+      unpaidDays,
       reviewComment: reviewComment || null,
       reviewedByAdminId: req.user!.employeeId,
       reviewedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     await leavesRepository.update(id, updates);
+
+    // 4. Send persistent notification to employee
+    const notifTitle = status === 'APPROVED' ? 'Leave Request Approved' : 'Leave Request Rejected';
+    const notifMsg =
+      status === 'APPROVED'
+        ? `Your leave request for ${leave.startDate} to ${leave.endDate} has been APPROVED (${paidDays} Paid, ${unpaidDays} Unpaid). ${reviewComment ? `Note: ${reviewComment}` : ''}`
+        : `Your leave request for ${leave.startDate} to ${leave.endDate} was REJECTED. ${reviewComment ? `Reason: ${reviewComment}` : ''}`;
+
+    await notificationsRepository.create({
+      id: `notif_leave_${id}_${Date.now()}`,
+      employeeId: leave.employeeId,
+      type: 'LEAVE_STATUS',
+      title: notifTitle,
+      message: notifMsg.trim(),
+      date: new Date().toISOString().split('T')[0],
+      read: false,
+      actionType: 'VIEW_LEAVE',
+      actionPayload: { leaveId: id },
+      createdAt: new Date().toISOString(),
+    });
 
     await auditRepository.log({
       actorId: req.user!.employeeId,
@@ -1076,11 +1213,391 @@ adminRouter.patch('/leaves/:id/review', async (req: AuthenticatedRequest, res: R
       actorRole: 'admin',
       action: 'LEAVE_REVIEWED',
       targetId: id,
-      details: { employeeId: leave.employeeId, newStatus: status, comment: reviewComment },
+      details: {
+        employeeId: leave.employeeId,
+        status,
+        paidDays,
+        unpaidDays,
+        comment: reviewComment,
+      },
       ipAddress: req.ip || '127.0.0.1',
     });
 
     return res.json({ success: true, leave: { ...leave, ...updates } });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Regularization Requests Admin Management
+adminRouter.get('/regularize', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const list = await regularizationRepository.getAll();
+    return res.json({ success: true, requests: list });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+adminRouter.post('/regularize/:id/review', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { status, reviewComment } = req.body;
+
+  if (!['APPROVED', 'REJECTED'].includes(status)) {
+    return res.status(400).json({ success: false, error: 'INVALID_STATUS', message: 'Status must be APPROVED or REJECTED.' });
+  }
+
+  try {
+    const regReq = await regularizationRepository.getById(id);
+    if (!regReq) {
+      return res.status(404).json({ success: false, error: 'REQUEST_NOT_FOUND', message: 'Regularization request not found.' });
+    }
+
+    if (status === 'APPROVED') {
+      // Find or create attendance record for that date
+      const existing = await attendanceRepository.getByEmployeeAndDate(regReq.employeeId, regReq.attendanceDate);
+      const targetRecord = existing.find((r) => r.shiftType === regReq.shiftType) || existing[0];
+
+      if (targetRecord) {
+        const recId = targetRecord.recordId || targetRecord.id;
+        if (recId) {
+          await attendanceRepository.update(recId, {
+            attendanceStatus: 'PRESENT_FULL_DAY',
+            attendanceState: 'SIGNED_OUT',
+            sessionStatus: 'CLOSED',
+            isLate: false,
+            isCorrected: true,
+            workingMinutes: 540, // standard full day
+            adminCorrectionReason: `Regularization Approved: ${regReq.reason}`,
+            adminCorrectionBy: req.user!.fullName,
+            adminCorrectionAt: new Date().toISOString(),
+          });
+        }
+      } else {
+        // Create approved attendance record
+        const newId = `att_reg_${regReq.employeeId}_${regReq.attendanceDate}_${Date.now()}`;
+        await attendanceRepository.create({
+          recordId: newId,
+          id: newId,
+          employeeId: regReq.employeeId,
+          employeeNameSnapshot: regReq.employeeName,
+          department: regReq.department,
+          siteId: 'SITE_REGULARIZED',
+          siteNameSnapshot: 'Regularized Attendance',
+          locationId: 'LOC_REGULARIZED',
+          locationNameSnapshot: 'Regularized Shift',
+          shiftType: regReq.shiftType,
+          attendanceDate: regReq.attendanceDate,
+          businessDate: regReq.attendanceDate,
+          signInTime: `${regReq.attendanceDate}T${regReq.requestedSignInTime}:00.000Z`,
+          signOutTime: `${regReq.attendanceDate}T${regReq.requestedSignOutTime}:00.000Z`,
+          signOutReason: 'NORMAL_END',
+          attendanceState: 'SIGNED_OUT',
+          sessionStatus: 'CLOSED',
+          attendanceStatus: 'PRESENT_FULL_DAY',
+          isLate: false,
+          isExtraShift: false,
+          extraShiftType: null,
+          workingMinutes: 540,
+          isCorrected: true,
+          activeCorrectionId: null,
+          adminCorrectionReason: `Regularization Approved: ${regReq.reason}`,
+          adminCorrectionBy: req.user!.fullName,
+          adminCorrectionAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    const updates = {
+      status,
+      reviewedByAdminId: req.user!.employeeId,
+      reviewedByAdminName: req.user!.fullName,
+      reviewComment: reviewComment || null,
+      reviewedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await regularizationRepository.update(id, updates);
+
+    // Send persistent notification to employee
+    const notifTitle = status === 'APPROVED' ? 'Attendance Regularized' : 'Regularization Request Rejected';
+    const notifMsg =
+      status === 'APPROVED'
+        ? `Your attendance regularization for ${regReq.attendanceDate} (${regReq.shiftType} Shift) has been APPROVED and marked as Present (Full Day).`
+        : `Your attendance regularization for ${regReq.attendanceDate} was REJECTED. ${reviewComment ? `Reason: ${reviewComment}` : ''}`;
+
+    await notificationsRepository.create({
+      id: `notif_reg_${id}_${Date.now()}`,
+      employeeId: regReq.employeeId,
+      type: 'REGULARIZATION',
+      title: notifTitle,
+      message: notifMsg.trim(),
+      date: new Date().toISOString().split('T')[0],
+      read: false,
+      actionType: 'VIEW_ATTENDANCE',
+      actionPayload: { date: regReq.attendanceDate },
+      createdAt: new Date().toISOString(),
+    });
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'REGULARIZATION_REVIEWED',
+      targetId: id,
+      details: {
+        employeeId: regReq.employeeId,
+        date: regReq.attendanceDate,
+        status,
+        comment: reviewComment,
+      },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Regularization request successfully ${status.toLowerCase()}.`,
+      request: { ...regReq, ...updates },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Bulk Access Management (Centralized assignment of Projects, Sites & Geofences)
+adminRouter.post('/access/bulk-assign', async (req: AuthenticatedRequest, res: Response) => {
+  const { employeeIds, targetType, targetId, action } = req.body;
+
+  if (!Array.isArray(employeeIds) || employeeIds.length === 0 || !targetType || !targetId || !action) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_PARAMETERS',
+      message: 'employeeIds array, targetType, targetId, and action (ASSIGN/REMOVE) are required.',
+    });
+  }
+
+  try {
+    let modifiedCount = 0;
+    const cleanTargetId = String(targetId).trim();
+
+    for (const empId of employeeIds) {
+      const cleanEmpId = String(empId).toUpperCase().trim();
+      const employee = await employeesRepository.getById(cleanEmpId);
+      if (!employee) continue;
+
+      if (targetType === 'PROJECT_SITE') {
+        const currentSites = employee.assignedSiteIds || [];
+        let newSites: string[];
+
+        if (action === 'ASSIGN') {
+          newSites = Array.from(new Set([...currentSites, cleanTargetId]));
+        } else {
+          newSites = currentSites.filter((id) => id !== cleanTargetId);
+        }
+
+        await employeesRepository.update(cleanEmpId, {
+          assignedSiteIds: newSites,
+          updatedAt: new Date().toISOString(),
+        });
+        modifiedCount++;
+      } else if (targetType === 'LOCATION') {
+        const currentLocs = employee.assignedLocationIds || [];
+        let newLocs: string[];
+
+        if (action === 'ASSIGN') {
+          newLocs = Array.from(new Set([...currentLocs, cleanTargetId]));
+        } else {
+          newLocs = currentLocs.filter((id) => id !== cleanTargetId);
+        }
+
+        await employeesRepository.update(cleanEmpId, {
+          assignedLocationIds: newLocs,
+          updatedAt: new Date().toISOString(),
+        });
+        modifiedCount++;
+      }
+    }
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: `ACCESS_BULK_${action}`,
+      targetId: cleanTargetId,
+      details: {
+        targetType,
+        targetId: cleanTargetId,
+        action,
+        count: modifiedCount,
+        employeeIds,
+      },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: `Successfully updated access for ${modifiedCount} employee(s).`,
+      modifiedCount,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Holidays Management CRUD
+adminRouter.get('/holidays', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const holidays = await holidaysRepository.getAll();
+    return res.json({ success: true, holidays });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+adminRouter.post('/holidays', async (req: AuthenticatedRequest, res: Response) => {
+  const { name, date, isMandatory, description } = req.body;
+
+  if (!name || !date) {
+    return res.status(400).json({ success: false, error: 'MISSING_FIELDS', message: 'Holiday name and date (YYYY-MM-DD) are required.' });
+  }
+
+  const cleanDate = String(date).trim();
+  const year = parseInt(cleanDate.split('-')[0], 10) || new Date().getFullYear();
+  const id = `hol_${cleanDate}_${Math.random().toString(36).substring(2, 6)}`;
+
+  const holidayDoc: Holiday = {
+    id,
+    name: String(name).trim(),
+    date: cleanDate,
+    isMandatory: isMandatory !== false,
+    description: description ? String(description).trim() : '',
+    year,
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    const created = await holidaysRepository.create(holidayDoc);
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'HOLIDAY_CREATED',
+      targetId: id,
+      details: { name, date: cleanDate, year },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, message: 'Holiday added successfully.', holiday: created });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+adminRouter.put('/holidays/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { name, date, isMandatory, description, isActive } = req.body;
+
+  try {
+    const existing = await holidaysRepository.getById(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'HOLIDAY_NOT_FOUND', message: 'Holiday not found.' });
+    }
+
+    const updates: Partial<Holiday> = {};
+    if (name !== undefined) updates.name = String(name).trim();
+    if (date !== undefined) {
+      updates.date = String(date).trim();
+      updates.year = parseInt(updates.date.split('-')[0], 10);
+    }
+    if (isMandatory !== undefined) updates.isMandatory = !!isMandatory;
+    if (description !== undefined) updates.description = String(description).trim();
+    if (isActive !== undefined) updates.isActive = !!isActive;
+
+    await holidaysRepository.update(id, updates);
+
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'HOLIDAY_UPDATED',
+      targetId: id,
+      details: updates,
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, message: 'Holiday updated successfully.', holiday: { ...existing, ...updates } });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+adminRouter.delete('/holidays/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    await holidaysRepository.delete(id);
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'HOLIDAY_DELETED',
+      targetId: id,
+      details: { holidayId: id },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, message: 'Holiday deleted successfully.' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Delete Project Site safely
+adminRouter.delete('/sites/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const site = await sitesRepository.getById(id);
+    if (!site) return res.status(404).json({ success: false, error: 'SITE_NOT_FOUND' });
+
+    await sitesRepository.update(id, { isActive: false });
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'SITE_DEACTIVATED',
+      targetId: id,
+      details: { siteName: site.siteName },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, message: `Project site "${site.siteName}" has been deactivated.` });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Delete Geofence Location safely
+adminRouter.delete('/locations/:id', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const loc = await locationsRepository.getById(id);
+    if (!loc) return res.status(404).json({ success: false, error: 'LOCATION_NOT_FOUND' });
+
+    await locationsRepository.update(id, { isActive: false });
+    await auditRepository.log({
+      actorId: req.user!.employeeId,
+      actorName: req.user!.fullName,
+      actorRole: 'admin',
+      action: 'LOCATION_DEACTIVATED',
+      targetId: id,
+      details: { locationName: loc.locationName },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({ success: true, message: `Location "${loc.locationName}" has been deactivated.` });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1101,16 +1618,6 @@ adminRouter.get('/audit-logs', async (req: AuthenticatedRequest, res: Response) 
   try {
     const logs = await auditRepository.getRecent();
     return res.json({ success: true, logs });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Holidays
-adminRouter.get('/holidays', async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const holidays = await policyRepository.getHolidays();
-    return res.json({ success: true, holidays });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

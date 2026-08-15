@@ -275,11 +275,124 @@ export const api = {
     startDate: string;
     endDate: string;
     reason: string;
+    attachmentUrl?: string | null;
+    attachmentName?: string | null;
+    attachmentType?: string | null;
   }): Promise<{ success: boolean; message: string; leave: LeaveRecord }> {
     return request('/api/v1/attendance/leaves', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+
+  async getMyLeaveBalance(): Promise<{ success: boolean; balance: any; ledger: any[] }> {
+    return request('/api/v1/attendance/leaves/balance');
+  },
+
+  async getNotifications(): Promise<{ success: boolean; notifications: any[] }> {
+    return request('/api/v1/attendance/notifications');
+  },
+
+  async markNotificationRead(id: string): Promise<any> {
+    return request(`/api/v1/attendance/notifications/${id}/read`, { method: 'PATCH' });
+  },
+
+  async markAllNotificationsRead(): Promise<any> {
+    return request('/api/v1/attendance/notifications/mark-all-read', { method: 'POST' });
+  },
+
+  async submitRegularization(payload: {
+    attendanceDate: string;
+    shiftType: string;
+    requestedSignInTime: string;
+    requestedSignOutTime: string;
+    reason: string;
+    attendanceRecordId?: string | null;
+    supportingDocUrl?: string | null;
+  }): Promise<{ success: boolean; message: string; request: any }> {
+    return request('/api/v1/attendance/regularize', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async requestRegularization(payload: {
+    attendanceDate: string;
+    shiftType: string;
+    requestedSignInTime: string;
+    requestedSignOutTime: string;
+    reason: string;
+    attendanceRecordId?: string | null;
+    supportingDocUrl?: string | null;
+  }): Promise<{ success: boolean; message: string; request: any }> {
+    return this.submitRegularization(payload);
+  },
+
+  async getMyRegularizations(): Promise<{ success: boolean; requests: any[] }> {
+    return request('/api/v1/attendance/regularize/my-requests');
+  },
+
+  async getAdminRegularizations(): Promise<{ success: boolean; requests: any[] }> {
+    return request('/api/v1/admin/regularize');
+  },
+
+  async reviewRegularization(id: string, status: 'APPROVED' | 'REJECTED', reviewComment?: string): Promise<any> {
+    return request(`/api/v1/admin/regularize/${id}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ status, reviewComment }),
+    });
+  },
+
+  async bulkAssignAccess(payload: {
+    employeeIds: string[];
+    targetType: 'PROJECT_SITE' | 'LOCATION';
+    targetId: string;
+    action: 'ASSIGN' | 'REMOVE';
+  }): Promise<{ success: boolean; message: string; modifiedCount: number }> {
+    return request('/api/v1/admin/access/bulk-assign', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getHolidays(year?: number): Promise<{ success: boolean; holidays: any[] }> {
+    return request('/api/v1/attendance/holidays');
+  },
+
+  async getAdminHolidays(): Promise<{ success: boolean; holidays: any[] }> {
+    return request('/api/v1/admin/holidays');
+  },
+
+  async createHoliday(payload: { name: string; date: string; isMandatory?: boolean; description?: string }): Promise<any> {
+    return request('/api/v1/admin/holidays', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateHoliday(id: string, payload: any): Promise<any> {
+    return request(`/api/v1/admin/holidays/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteHoliday(id: string): Promise<any> {
+    return request(`/api/v1/admin/holidays/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getAdminLeaveBalances(): Promise<{ success: boolean; balances: any[] }> {
+    return request('/api/v1/admin/leaves/balances');
+  },
+
+  async deleteSite(id: string): Promise<any> {
+    return request(`/api/v1/admin/sites/${id}`, { method: 'DELETE' });
+  },
+
+  async deleteLocation(id: string): Promise<any> {
+    return request(`/api/v1/admin/locations/${id}`, { method: 'DELETE' });
   },
 
   async getMyLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {

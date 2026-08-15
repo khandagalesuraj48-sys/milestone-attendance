@@ -23,6 +23,9 @@ import { LiveAttendanceRegister } from './components/AdminDashboard/LiveAttendan
 import { EmployeeDirectory } from './components/AdminDashboard/EmployeeDirectory';
 import { CorrectionStudioModal } from './components/AdminDashboard/CorrectionStudioModal';
 import { SiteManager } from './components/AdminDashboard/SiteManager';
+import { AccessManager } from './components/AdminDashboard/AccessManager';
+import { LeaveReviewCenter } from './components/AdminDashboard/LeaveReviewCenter';
+import { HolidayManager } from './components/AdminDashboard/HolidayManager';
 import { SecurityCenter } from './components/AdminDashboard/SecurityCenter';
 import { PolicyMaster } from './components/AdminDashboard/PolicyMaster';
 import { AuditVault } from './components/AdminDashboard/AuditVault';
@@ -58,13 +61,14 @@ export default function App() {
 
   // Admin State
   const [adminActiveTab, setAdminActiveTab] = useState<
-    'DASHBOARD' | 'REGISTER' | 'EMPLOYEES' | 'SITES' | 'SECURITY' | 'POLICY' | 'AUDIT' | 'REPORTS'
+    'DASHBOARD' | 'REGISTER' | 'EMPLOYEES' | 'SITES' | 'ACCESS' | 'LEAVES' | 'HOLIDAYS' | 'SECURITY' | 'POLICY' | 'AUDIT' | 'REPORTS'
   >('DASHBOARD');
   const [adminSummary, setAdminSummary] = useState<Record<string, number>>({});
   const [adminTodayDate, setAdminTodayDate] = useState<string>('');
   const [correctingRecord, setCorrectingRecord] = useState<AttendanceRecord | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
   // Common Data
   const [locations, setLocations] = useState<LocationSite[]>([]);
@@ -85,6 +89,24 @@ export default function App() {
   useEffect(() => {
     checkAuth();
   }, []);
+
+  // Fetch unread notifications for employee
+  const fetchUnreadCount = async () => {
+    if (!currentUser || currentUser.role === 'admin' || currentUser.mustChangePassword) return;
+    try {
+      const res = await api.getNotifications();
+      const unread = (res.notifications || []).filter((n: any) => !n.isRead).length;
+      setUnreadNotificationsCount(unread);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'admin') {
+      fetchUnreadCount();
+      const interval = setInterval(fetchUnreadCount, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
 
   // Fetch approved locations
   const fetchLocations = async () => {
@@ -188,6 +210,14 @@ export default function App() {
         { id: 'REGISTER', label: 'Live Muster Register', icon: FileSpreadsheet },
         { id: 'EMPLOYEES', label: 'Staff Workforce', icon: Users },
         { id: 'SITES', label: 'Projects & Locations', icon: MapPin },
+        { id: 'ACCESS', label: 'Site Access Manager', icon: Layers },
+      ],
+    },
+    {
+      group: 'LEAVE & REGULARIZATION',
+      items: [
+        { id: 'LEAVES', label: 'Leave & Regularization', icon: FileText },
+        { id: 'HOLIDAYS', label: 'Company Holidays', icon: Calendar },
       ],
     },
     {
@@ -200,7 +230,7 @@ export default function App() {
       group: 'GOVERNANCE & SECURITY',
       items: [
         { id: 'SECURITY', label: 'Security Radar', icon: ShieldAlert },
-        { id: 'POLICY', label: 'Policy & Rules', icon: FileText },
+        { id: 'POLICY', label: 'Policy & Rules', icon: Sliders },
         { id: 'AUDIT', label: 'Audit Vault', icon: Shield },
       ],
     },
@@ -219,7 +249,7 @@ export default function App() {
         isMobileMenuOpen={isMobileMenuOpen}
         onOpenEmployeeMenu={() => setIsEmployeeMenuOpen(true)}
         onOpenNotifications={() => setIsNotificationsOpen(true)}
-        notificationsCount={autoSignOutNotice ? 1 : 0}
+        notificationsCount={unreadNotificationsCount > 0 ? unreadNotificationsCount : (autoSignOutNotice ? 1 : 0)}
       />
 
       {/* Employee Navigation Drawers (Mobile & Desktop) */}
@@ -370,6 +400,18 @@ export default function App() {
 
                 {adminActiveTab === 'SITES' && (
                   <SiteManager locations={locations} onRefresh={fetchLocations} />
+                )}
+
+                {adminActiveTab === 'ACCESS' && (
+                  <AccessManager locations={locations} />
+                )}
+
+                {adminActiveTab === 'LEAVES' && (
+                  <LeaveReviewCenter />
+                )}
+
+                {adminActiveTab === 'HOLIDAYS' && (
+                  <HolidayManager />
                 )}
 
                 {adminActiveTab === 'SECURITY' && <SecurityCenter />}

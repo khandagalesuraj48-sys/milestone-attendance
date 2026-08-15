@@ -15,6 +15,7 @@ import {
   Eye,
   Navigation,
   CheckCircle2,
+  Trash2,
 } from 'lucide-react';
 
 interface SiteManagerProps {
@@ -117,6 +118,38 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
     }
   };
 
+  const handleDeleteSite = async (siteId: string, siteName: string) => {
+    if (!window.confirm(`Are you sure you want to deactivate Project Site "${siteName}" (${siteId})?`)) return;
+    try {
+      setLoading(true);
+      setError('');
+      await api.deleteSite(siteId);
+      setSuccessMsg(`Project site "${siteName}" deactivated successfully.`);
+      fetchSites();
+      onRefresh();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete site.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteLocation = async (locId: string, locName: string) => {
+    if (!window.confirm(`Are you sure you want to deactivate Geofence Location "${locName}"?`)) return;
+    try {
+      setLoading(true);
+      setError('');
+      await api.deleteLocation(locId);
+      setSuccessMsg(`Geofence location "${locName}" deactivated successfully.`);
+      fetchSites();
+      onRefresh();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete location.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const openAddLocationForSite = (siteId: string) => {
     setLocSiteId(siteId);
     setShowAddLocationModal(true);
@@ -192,17 +225,24 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
                 <div className="pt-2 flex items-center justify-between gap-2">
                   <button
                     onClick={() => setSelectedSiteForDrilldown({ ...site, siteLocations })}
-                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 text-xs font-semibold flex items-center justify-center space-x-1 transition"
+                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 text-xs font-semibold flex items-center justify-center space-x-1 transition cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5 text-slate-500" />
                     <span>View Perimeters</span>
                   </button>
                   <button
                     onClick={() => openAddLocationForSite(site.siteId)}
-                    className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs transition"
+                    className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs transition cursor-pointer"
                     title="Add Location under this Site"
                   >
                     <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSite(site.siteId, site.siteName)}
+                    className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs transition cursor-pointer border border-rose-200"
+                    title="Deactivate Project Site"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
@@ -251,9 +291,18 @@ export const SiteManager: React.FC<SiteManagerProps> = ({ locations, onRefresh }
                       </p>
                     </div>
                   </div>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-white text-slate-800 border border-slate-200">
-                    {loc.radiusMeters}m Radius
-                  </span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-white text-slate-800 border border-slate-200">
+                      {loc.radiusMeters}m Radius
+                    </span>
+                    <button
+                      onClick={() => handleDeleteLocation(locId, loc.locationName || loc.name || 'Location')}
+                      className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                      title="Deactivate Location"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 <p className="text-xs text-slate-600 truncate">{loc.address || 'Standard site perimeter'}</p>

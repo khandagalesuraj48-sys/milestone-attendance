@@ -189,6 +189,7 @@ export interface AttendanceRecord {
   id?: string; // compatibility alias
   employeeId: string;
   employeeName?: string;
+  employeeNameSnapshot?: string;
   department?: string;
   businessDate: string; // YYYY-MM-DD in IST (authoritative)
   attendanceDate?: string; // alias
@@ -233,6 +234,9 @@ export interface AttendanceRecord {
 
   isCorrected: boolean;
   activeCorrectionId: string | null;
+  adminCorrectionReason?: string;
+  adminCorrectionBy?: string;
+  adminCorrectionAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -290,7 +294,10 @@ export interface Holiday {
   date: string; // YYYY-MM-DD
   isMandatory: boolean;
   year: number;
+  isActive?: boolean;
+  description?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface LeaveRecord {
@@ -304,11 +311,98 @@ export interface LeaveRecord {
   totalDays: number;
   reason: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+  attachmentType?: string | null;
+  paidDays?: number;
+  unpaidDays?: number;
   reviewedByAdminId: string | null;
   reviewComment: string | null;
   reviewedAt: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface LeaveBalance {
+  employeeId: string;
+  employeeName?: string;
+  department?: string;
+  openingBalance: number;
+  monthlyEntitlement: number; // +2 days per month
+  carryForward: number;
+  paidUsed: number;
+  paidRemaining: number;
+  approvedUnpaid: number;
+  currentBalance?: number; // alias for paidRemaining
+  usedLeaves?: number; // alias for paidUsed
+  unpaidLeaves?: number; // alias for approvedUnpaid
+  creditedMonths: string[]; // e.g. ["2026-01", "2026-02"]
+  ledger?: LeaveLedgerEntry[];
+  updatedAt: string;
+}
+
+export interface LeaveLedgerEntry {
+  id: string;
+  employeeId: string;
+  employeeName?: string;
+  type?: 'OPENING' | 'MONTHLY_ENTITLEMENT' | 'LEAVE_DEBIT' | 'LEAVE_REVERSAL' | 'ADMIN_ADJUSTMENT';
+  entryType?: string; // alias for display
+  amount?: number; // positive or negative
+  changeAmount?: number; // alias for amount
+  balanceAfter: number;
+  month?: string; // YYYY-MM
+  date?: string; // YYYY-MM-DD or display
+  leaveId?: string;
+  note?: string;
+  description?: string; // alias for note
+  createdAt: string;
+}
+
+export interface AttendanceRegularizationRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  attendanceRecordId?: string | null;
+  attendanceDate: string; // YYYY-MM-DD
+  shiftType: ShiftType;
+  requestedSignInTime: string; // HH:mm or ISO
+  requestedSignOutTime: string; // HH:mm or ISO
+  reason: string;
+  supportingDocUrl?: string | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewedByAdminId?: string | null;
+  reviewedByAdminName?: string | null;
+  reviewComment?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface AppNotification {
+  id: string;
+  employeeId: string; // Employee ID or 'ALL' or 'ADMIN'
+  type: 'ATTENDANCE_ERROR' | 'REGULARIZATION' | 'LEAVE_STATUS' | 'ANNOUNCEMENT' | 'INFO';
+  title: string;
+  message: string;
+  date: string; // YYYY-MM-DD or ISO
+  read: boolean;
+  actionType?: 'REGULARIZE_ATTENDANCE' | 'VIEW_LEAVE' | 'VIEW_ATTENDANCE' | 'OPEN_DRAWER';
+  actionPayload?: {
+    date?: string;
+    recordId?: string;
+    leaveId?: string;
+    shiftType?: ShiftType;
+    reason?: string;
+  };
+  createdAt: string;
+}
+
+export interface BulkAccessAssignmentParams {
+  employeeIds: string[];
+  targetType: 'PROJECT_SITE' | 'LOCATION';
+  targetId: string;
+  action: 'ASSIGN' | 'REMOVE';
 }
 
 export interface SecurityEvent {
