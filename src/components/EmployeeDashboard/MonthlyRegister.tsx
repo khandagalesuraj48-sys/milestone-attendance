@@ -192,7 +192,7 @@ export const MonthlyRegister: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-3 font-mono text-slate-700">
                       {isOpen
-                        ? 'Counting...'
+                        ? '--'
                         : `${Math.floor((r.workingMinutes || 0) / 60)}h ${(r.workingMinutes || 0) % 60}m`}
                     </td>
                     <td className="py-3.5 px-3">

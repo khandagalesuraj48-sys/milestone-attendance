@@ -141,11 +141,17 @@ export const TodayShiftList: React.FC<TodayShiftListProps> = ({ shifts = [] }) =
                     </div>
                   </div>
                   <div className="bg-white p-2 rounded-xl border border-slate-200">
-                    <div className="text-[10px] text-slate-500 font-semibold uppercase">Duration</div>
-                    <div className="font-mono text-slate-900 font-bold mt-0.5">
-                      {isOpen
-                        ? 'Counting...'
-                        : `${Math.floor((record.workingMinutes || 0) / 60)}h ${(record.workingMinutes || 0) % 60}m`}
+                    <div className="text-[10px] text-slate-500 font-semibold uppercase">Session</div>
+                    <div className="text-slate-900 font-bold mt-0.5 truncate text-[11px]">
+                      {isOpen ? (
+                        <span className="text-emerald-700 font-bold">Active</span>
+                      ) : record.attendanceStatus === 'PRESENT_FULL_DAY' ? (
+                        'Full Day'
+                      ) : record.attendanceStatus === 'PRESENT_HALF_DAY' ? (
+                        'Half Day'
+                      ) : (
+                        'Completed'
+                      )}
                     </div>
                   </div>
                 </div>

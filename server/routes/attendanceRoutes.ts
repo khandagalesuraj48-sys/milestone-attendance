@@ -14,6 +14,7 @@ import { notificationsRepository } from '../repositories/notificationsRepository
 import { holidaysRepository } from '../repositories/holidaysRepository';
 import { auditRepository } from '../repositories/auditRepository';
 import { usersRepository } from '../repositories/usersRepository';
+import { storageRepository } from '../repositories/storageRepository';
 import { LeaveRecord, AttendanceRegularizationRequest, AppNotification } from '../../src/types';
 
 export const attendanceRouter = Router();
@@ -279,7 +280,7 @@ attendanceRouter.get('/leaves/balance', async (req: AuthenticatedRequest, res: R
 // POST /api/v1/attendance/leaves - Apply for leave with optional supporting document
 attendanceRouter.post('/leaves', async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const { leaveType, startDate, endDate, reason, attachmentUrl, attachmentName, attachmentType } = req.body;
+  const { leaveType, startDate, endDate, reason, attachmentUrl, attachmentName, attachmentType, attachmentSize, attachmentId } = req.body;
 
   if (!leaveType || !startDate || !endDate || !reason) {
     return res.status(400).json({ success: false, error: 'All leave fields are required.' });
@@ -303,6 +304,8 @@ attendanceRouter.post('/leaves', async (req: AuthenticatedRequest, res: Response
     attachmentUrl: attachmentUrl || null,
     attachmentName: attachmentName || null,
     attachmentType: attachmentType || null,
+    attachmentSize: attachmentSize || null,
+    attachmentId: attachmentId || null,
     status: 'PENDING',
     reviewComment: null,
     reviewedByAdminId: null,
@@ -762,42 +765,63 @@ attendanceRouter.get('/team-feed', async (req: AuthenticatedRequest, res: Respon
 // POST /api/v1/attendance/profile-photo - Upload/update own profile photo
 attendanceRouter.post('/profile-photo', async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const { photoUrl } = req.body;
+  let { photoUrl } = req.body;
 
   if (!photoUrl || typeof photoUrl !== 'string') {
-    return res.status(400).json({ success: false, error: 'PHOTO_REQUIRED', message: 'Valid photo image data is required.' });
-  }
-
-  // Size limit check (max 2.5MB payload)
-  if (photoUrl.length > 3.5 * 1024 * 1024) {
-    return res.status(400).json({ success: false, error: 'PHOTO_TOO_LARGE', message: 'Image size exceeds maximum allowed limit (2.5MB).' });
+    return res.status(400).json({ success: false, error: 'PHOTO_REQUIRED', message: 'Unable to upload profile photo. Please try again.' });
   }
 
   try {
+    // If base64 data URL, store in persistent storage repository
+    if (photoUrl.startsWith('data:image')) {
+      const matches = photoUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const mimeType = matches[1];
+        const buffer = Buffer.from(matches[2], 'base64');
+        const ext = mimeType.split('/')[1] || 'jpg';
+        const saved = await storageRepository.saveFile({
+          fileName: `avatar_${user.employeeId || user.uid}.${ext}`,
+          fileType: mimeType,
+          fileSize: buffer.length,
+          buffer,
+          uploadedBy: user.employeeId || user.uid,
+          uploadedByName: user.fullName,
+          uploadedByRole: user.role,
+          purpose: 'profile_photo',
+        });
+        photoUrl = saved.url;
+      }
+    }
+
     await usersRepository.update(user.uid, { photoUrl });
     if (user.employeeId) {
       await employeesRepository.update(user.employeeId, { photoUrl });
     }
 
     await auditRepository.log({
-      actorId: user.employeeId,
+      actorId: user.employeeId || user.uid,
       actorName: user.fullName,
       actorRole: user.role,
       action: 'PROFILE_PHOTO_UPDATED',
       targetId: user.uid,
-      details: { timestamp: new Date().toISOString() },
+      details: { photoUrl, timestamp: new Date().toISOString() },
       ipAddress: req.ip || '127.0.0.1',
     });
 
     const updatedUser = await usersRepository.getByUid(user.uid);
     return res.json({
       success: true,
-      message: 'Profile photo successfully updated.',
+      message: 'Profile photo updated successfully.',
       photoUrl,
       user: updatedUser || { ...user, photoUrl },
     });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    console.error('[Profile Photo Route Error]', err);
+    return res.status(500).json({
+      success: false,
+      error: 'PROFILE_PHOTO_ERROR',
+      message: 'Unable to upload profile photo. Please try again.',
+    });
   }
 });
 

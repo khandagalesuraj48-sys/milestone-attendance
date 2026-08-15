@@ -27,6 +27,62 @@ interface MyProfileProps {
   onUserUpdated?: (user: User) => void;
 }
 
+// Helper to smartly optimize high-resolution avatar photos without quality loss
+async function optimizeImageForAvatar(file: File): Promise<Blob | File> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) {
+      resolve(file);
+      return;
+    }
+
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const maxDim = 1200;
+      let { width, height } = img;
+
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          resolve(blob || file);
+        },
+        'image/jpeg',
+        0.92
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [assignedSites, setAssignedSites] = useState<Site[]>([]);
@@ -64,43 +120,41 @@ export const MyProfile: React.FC<MyProfileProps> = ({ user, onUserUpdated }) => 
     fetchProfile();
   }, []);
 
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setPhotoError('');
     setPhotoSuccess('');
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setPhotoError('Please select a valid image file (PNG, JPG, JPEG, WEBP).');
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic'].includes(ext);
+
+    if (!isImage) {
+      setPhotoError('Please select a valid image file (JPG, PNG, WEBP).');
       return;
     }
 
-    if (file.size > 3 * 1024 * 1024) {
-      setPhotoError('Image file must be smaller than 3MB.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64Data = event.target?.result as string;
-      if (!base64Data) return;
-
-      try {
-        setPhotoLoading(true);
-        const res = await api.uploadProfilePhoto(base64Data);
-        if (res.success) {
-          setPhotoSuccess('Profile photo updated successfully.');
-          if (onUserUpdated && res.user) {
-            onUserUpdated(res.user);
-          }
+    try {
+      setPhotoLoading(true);
+      const optimizedBlob = await optimizeImageForAvatar(file);
+      const res = await api.uploadProfilePhoto(optimizedBlob);
+      if (res.success) {
+        setPhotoSuccess('Profile photo updated successfully.');
+        if (onUserUpdated && res.user) {
+          onUserUpdated(res.user);
         }
-      } catch (err: any) {
-        setPhotoError(err.message || 'Failed to upload profile photo.');
-      } finally {
-        setPhotoLoading(false);
+      } else {
+        setPhotoError('Unable to upload profile photo. Please try again.');
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Profile photo upload failure:', err);
+      setPhotoError('Unable to upload profile photo. Please try again.');
+    } finally {
+      setPhotoLoading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleRemovePhoto = async () => {

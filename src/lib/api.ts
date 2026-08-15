@@ -84,6 +84,66 @@ async function request<T = any>(endpoint: string, options: RequestInit = {}): Pr
   return data as T;
 }
 
+async function uploadRequest<T = any>(endpoint: string, formData: FormData): Promise<T> {
+  let token = localStorage.getItem(TOKEN_KEY);
+
+  if (token === 'null' || token === 'undefined' || token === '') {
+    token = null;
+    localStorage.removeItem(TOKEN_KEY);
+  }
+
+  if (auth.currentUser) {
+    try {
+      const refreshedToken = await auth.currentUser.getIdToken();
+      if (refreshedToken) {
+        token = refreshedToken;
+        localStorage.setItem(TOKEN_KEY, token);
+      }
+    } catch (e) {
+      console.warn('Failed to refresh Firebase ID token:', e);
+    }
+  }
+
+  const headers: Record<string, string> = {};
+  if (token && token.trim().length > 0) {
+    headers['Authorization'] = `Bearer ${token.trim()}`;
+  }
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  const contentType = res.headers.get('content-type') || '';
+  let data: any;
+  if (contentType.includes('application/json')) {
+    data = await res.json();
+  } else {
+    const rawText = await res.text();
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = {
+        success: false,
+        error: res.statusText || 'SERVER_ERROR',
+        message: rawText && !rawText.startsWith('<') ? rawText : `Server responded with status ${res.status}`,
+      };
+    }
+  }
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+    const error = new Error(data.message || data.error || 'Upload failed');
+    (error as any).status = res.status;
+    (error as any).data = data;
+    throw error;
+  }
+  return data as T;
+}
+
 export const api = {
   getToken(): string | null {
     const token = localStorage.getItem(TOKEN_KEY);
@@ -270,6 +330,33 @@ export const api = {
     return request(url);
   },
 
+  async uploadFile(
+    file: File | Blob,
+    purpose: string = 'leave_attachment',
+    fileName?: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    file: {
+      id: string;
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+      url: string;
+      purpose: string;
+      createdAt: string;
+    };
+  }> {
+    const formData = new FormData();
+    if (file instanceof File) {
+      formData.append('file', file, fileName || file.name);
+    } else {
+      formData.append('file', file, fileName || 'upload.bin');
+    }
+    formData.append('purpose', purpose);
+    return uploadRequest('/api/v1/storage/upload', formData);
+  },
+
   async submitLeave(payload: {
     leaveType: string;
     startDate: string;
@@ -278,6 +365,8 @@ export const api = {
     attachmentUrl?: string | null;
     attachmentName?: string | null;
     attachmentType?: string | null;
+    attachmentSize?: number | null;
+    attachmentId?: string | null;
   }): Promise<{ success: boolean; message: string; leave: LeaveRecord }> {
     return request('/api/v1/attendance/leaves', {
       method: 'POST',
@@ -440,11 +529,20 @@ export const api = {
     return request('/api/v1/attendance/team-feed');
   },
 
-  async uploadProfilePhoto(photoUrl: string): Promise<{ success: boolean; photoUrl: string; user: User }> {
-    return request('/api/v1/attendance/profile-photo', {
-      method: 'POST',
-      body: JSON.stringify({ photoUrl }),
-    });
+  async uploadProfilePhoto(fileOrBase64: File | Blob | string): Promise<{ success: boolean; photoUrl: string; user: User }> {
+    if (typeof fileOrBase64 === 'string') {
+      return request('/api/v1/attendance/profile-photo', {
+        method: 'POST',
+        body: JSON.stringify({ photoUrl: fileOrBase64 }),
+      });
+    }
+    const formData = new FormData();
+    if (fileOrBase64 instanceof File) {
+      formData.append('file', fileOrBase64, fileOrBase64.name);
+    } else {
+      formData.append('file', fileOrBase64, 'avatar.jpg');
+    }
+    return uploadRequest('/api/v1/storage/profile-photo', formData);
   },
 
   async deleteProfilePhoto(): Promise<{ success: boolean; user: User }> {

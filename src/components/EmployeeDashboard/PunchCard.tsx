@@ -44,8 +44,6 @@ export const PunchCard: React.FC<PunchCardProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [successMsg, setSuccessMsg] = useState<string>('');
-  const [elapsedTime, setElapsedTime] = useState<string>('00:00:00');
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [locationStatus, setLocationStatus] = useState<LocationStatusType>('IDLE');
   const [locationMessage, setLocationMessage] = useState<string>('');
 
@@ -163,33 +161,6 @@ export const PunchCard: React.FC<PunchCardProps> = ({
     }
   }, [selectedLocationId]);
 
-  // Live Elapsed Working Timer for active session
-  useEffect(() => {
-    if (!activeSession || !activeSession.signInTime) {
-      setElapsedTime('00:00:00');
-      setElapsedSeconds(0);
-      return;
-    }
-
-    const calculateElapsed = () => {
-      const start = new Date(activeSession.signInTime!).getTime();
-      const now = Date.now();
-      const diffSeconds = Math.max(0, Math.floor((now - start) / 1000));
-      setElapsedSeconds(diffSeconds);
-
-      const hours = Math.floor(diffSeconds / 3600);
-      const mins = Math.floor((diffSeconds % 3600) / 60);
-      const secs = diffSeconds % 60;
-      setElapsedTime(
-        `${String(hours).padStart(2, '0')}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`
-      );
-    };
-
-    calculateElapsed();
-    const timer = setInterval(calculateElapsed, 1000);
-    return () => clearInterval(timer);
-  }, [activeSession]);
-
   const handlePunchIn = async () => {
     setError('');
     setSuccessMsg('');
@@ -268,18 +239,6 @@ export const PunchCard: React.FC<PunchCardProps> = ({
     });
   };
 
-  // Calculate today's total hours logged across all closed/open shifts
-  const todayTotalHours = (todayShifts || []).reduce((acc, curr) => {
-    if (curr.workingMinutes) return acc + curr.workingMinutes / 60;
-    if (curr.sessionStatus === 'OPEN' && curr.signInTime) {
-      const diffHrs = Math.max(0, (Date.now() - new Date(curr.signInTime).getTime()) / 3600000);
-      return acc + diffHrs;
-    }
-    return acc;
-  }, 0);
-
-  const shiftProgressPercent = Math.min(100, Math.round((elapsedSeconds / (9 * 3600)) * 100));
-
   return (
     <div id="punch-card-panel" className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-6 lg:p-7 shadow-xs text-slate-900 space-y-4 sm:space-y-5">
       {/* -------------------------------------------------------------------
@@ -302,7 +261,7 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           {activeSession ? (
             <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-              <span>Working Now</span>
+              <span>Signed In &bull; Active</span>
             </div>
           ) : (
             <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs">
@@ -338,13 +297,13 @@ export const PunchCard: React.FC<PunchCardProps> = ({
           ACTIVE SESSION HERO: SIGN OUT BLOCK
           ------------------------------------------------------------------- */}
       {activeSession ? (
-        <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 text-white shadow-xs border border-slate-800 space-y-4">
-          <div className="flex items-center justify-between gap-3">
+        <div className="p-5 sm:p-6 rounded-2xl bg-slate-900 text-white shadow-md border border-slate-800 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-400">
-                  {activeSession.shiftType} SHIFT ONGOING
+                  {activeSession.shiftType} SHIFT &bull; SIGNED IN
                 </span>
                 {activeSession.isExtraShift && (
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-200 border border-purple-400/30 uppercase">
@@ -352,44 +311,28 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                   </span>
                 )}
               </div>
-              <h3 className="text-base sm:text-lg font-extrabold text-white mt-1 truncate">
+              <h3 className="text-lg sm:text-xl font-extrabold text-white mt-1.5 truncate">
                 {activeSession.siteNameSnapshot || selectedSite?.siteName || 'Project Site'}
               </h3>
-              <p className="text-xs text-slate-300 mt-0.5 flex items-center space-x-1 truncate">
-                <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+              <p className="text-xs text-slate-300 mt-1 flex items-center space-x-1.5 truncate">
+                <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span className="truncate">{activeSession.locationNameSnapshot || 'Site Perimeter'}</span>
                 <span>&bull;</span>
                 <span>
-                  Started{' '}
-                  <strong className="text-white">
-                    {formatTime(activeSession.signInTime)} IST
-                  </strong>
+                  Signed In at <strong className="text-white">{formatTime(activeSession.signInTime)} IST</strong>
                 </span>
               </p>
             </div>
 
-            {/* Live Working Digital Counter */}
-            <div className="text-right bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-700/70 shrink-0">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">
-                Working Time
+            {/* Dynamic Active Status Banner */}
+            <div className="bg-emerald-950/70 border border-emerald-500/40 px-4 py-2.5 rounded-xl shrink-0 inline-flex flex-col sm:items-end justify-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center space-x-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span>Attendance Active</span>
               </span>
-              <span className="text-xl sm:text-2xl font-mono font-extrabold text-amber-400 tracking-tight">
-                {elapsedTime}
+              <span className="text-xs font-medium text-slate-300 mt-0.5">
+                Shift in progress
               </span>
-            </div>
-          </div>
-
-          {/* Shift Progress Visual Bar */}
-          <div>
-            <div className="flex items-center justify-between text-[11px] text-slate-300 mb-1 font-medium">
-              <span>9.0h Benchmark</span>
-              <span className="font-mono font-bold text-emerald-400">{shiftProgressPercent}%</span>
-            </div>
-            <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-amber-400 to-emerald-400 rounded-full transition-all duration-500"
-                style={{ width: `${shiftProgressPercent}%` }}
-              />
             </div>
           </div>
 
@@ -721,11 +664,17 @@ export const PunchCard: React.FC<PunchCardProps> = ({
                       </div>
                     </div>
                     <div className="bg-white p-1.5 rounded-xl border border-slate-200/80">
-                      <div className="text-[9px] text-slate-500 font-bold uppercase">DURATION</div>
-                      <div className="font-mono text-slate-900 font-bold text-[11px] mt-0.5">
-                        {isOpen
-                          ? 'In Progress'
-                          : `${Math.floor((record.workingMinutes || 0) / 60)}h ${(record.workingMinutes || 0) % 60}m`}
+                      <div className="text-[9px] text-slate-500 font-bold uppercase">SESSION</div>
+                      <div className="text-slate-900 font-bold text-[11px] mt-0.5 truncate">
+                        {isOpen ? (
+                          <span className="text-emerald-700">Active</span>
+                        ) : record.attendanceStatus === 'PRESENT_FULL_DAY' ? (
+                          'Full Day'
+                        ) : record.attendanceStatus === 'PRESENT_HALF_DAY' ? (
+                          'Half Day'
+                        ) : (
+                          'Completed'
+                        )}
                       </div>
                     </div>
                   </div>
@@ -737,23 +686,31 @@ export const PunchCard: React.FC<PunchCardProps> = ({
       </div>
 
       {/* -------------------------------------------------------------------
-          6. ATTENDANCE SUMMARY METRICS (Hours Logged, Credit, Compliance)
+          6. ATTENDANCE SUMMARY METRICS (Attendance Status & Security)
           ------------------------------------------------------------------- */}
       <div className="pt-3 border-t border-slate-100 grid grid-cols-3 gap-2 text-center">
         <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/70">
-          <span className="text-[10px] font-bold text-slate-500 uppercase block">Logged</span>
-          <span className="text-sm font-mono font-extrabold text-slate-900 block mt-0.5">
-            {todayTotalHours.toFixed(1)}h
+          <span className="text-[10px] font-bold text-slate-500 uppercase block">Today's Shifts</span>
+          <span className="text-sm font-bold text-slate-900 block mt-0.5">
+            {todayShifts.length} {todayShifts.length === 1 ? 'Shift' : 'Shifts'}
           </span>
-          <span className="text-[9px] text-slate-400 font-medium">9.0h Target</span>
+          <span className="text-[9px] text-slate-400 font-medium">Logged Today</span>
         </div>
 
         <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/70">
-          <span className="text-[10px] font-bold text-slate-500 uppercase block">Credit</span>
+          <span className="text-[10px] font-bold text-slate-500 uppercase block">Attendance Status</span>
           <span className="text-sm font-bold text-slate-900 block mt-0.5">
-            {todayTotalHours >= 9.0 ? '1.0 Full' : todayTotalHours >= 4.0 ? '0.5 Half' : todayTotalHours > 0 ? 'Active' : '0.0'}
+            {activeSession ? (
+              <span className="text-emerald-700">Signed In</span>
+            ) : todayShifts.length > 0 ? (
+              'Recorded'
+            ) : (
+              'Ready'
+            )}
           </span>
-          <span className="text-[9px] text-slate-400 font-medium">Unit Earned</span>
+          <span className="text-[9px] text-slate-400 font-medium">
+            {activeSession ? 'Shift Active' : 'Daily Record'}
+          </span>
         </div>
 
         <div className="p-2.5 rounded-2xl bg-slate-50 border border-slate-200/70">

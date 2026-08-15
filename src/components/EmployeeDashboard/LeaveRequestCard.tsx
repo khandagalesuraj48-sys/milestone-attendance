@@ -18,6 +18,7 @@ import {
   X,
   Download,
   Info,
+  ExternalLink,
 } from 'lucide-react';
 
 export const LeaveRequestCard: React.FC = () => {
@@ -35,10 +36,10 @@ export const LeaveRequestCard: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
   const [attachmentFile, setAttachmentFile] = useState<{
+    rawFile: File;
     fileName: string;
     fileType: string;
     fileSize: number;
-    base64Url: string;
   } | null>(null);
   const [leaveFormError, setLeaveFormError] = useState('');
   const [submittingLeave, setSubmittingLeave] = useState(false);
@@ -82,28 +83,30 @@ export const LeaveRequestCard: React.FC = () => {
   }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setLeaveFormError('');
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      setLeaveFormError('File size must be under 5 MB.');
+    const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv'];
+    const ext = '.' + (file.name.split('.').pop()?.toLowerCase() || '');
+    const isValid =
+      file.type.startsWith('image/') ||
+      validExtensions.includes(ext) ||
+      file.type.includes('pdf') ||
+      file.type.includes('document') ||
+      file.type.includes('sheet');
+
+    if (!isValid) {
+      setLeaveFormError('Unsupported file format. Please select a PDF, Word, Excel, or Image document.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAttachmentFile({
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        base64Url: reader.result as string,
-      });
-      setLeaveFormError('');
-    };
-    reader.onerror = () => {
-      setLeaveFormError('Failed to read selected file.');
-    };
-    reader.readAsDataURL(file);
+    setAttachmentFile({
+      rawFile: file,
+      fileName: file.name,
+      fileType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+    });
   };
 
   const handleLeaveSubmit = async (e: React.FormEvent) => {
@@ -121,14 +124,48 @@ export const LeaveRequestCard: React.FC = () => {
 
     try {
       setSubmittingLeave(true);
+
+      let uploadedMeta: {
+        url: string;
+        fileName: string;
+        fileType: string;
+        fileSize: number;
+        id: string;
+      } | null = null;
+
+      if (attachmentFile?.rawFile) {
+        try {
+          const uploadRes = await api.uploadFile(attachmentFile.rawFile, 'leave_attachment');
+          if (uploadRes.success && uploadRes.file) {
+            uploadedMeta = {
+              url: uploadRes.file.url,
+              fileName: uploadRes.file.fileName,
+              fileType: uploadRes.file.fileType,
+              fileSize: uploadRes.file.fileSize,
+              id: uploadRes.file.id,
+            };
+          } else {
+            throw new Error('Attachment upload failed. Please try again.');
+          }
+        } catch (uploadErr: any) {
+          setLeaveFormError(uploadErr.message || 'Attachment upload failed. Please try again.');
+          setSubmittingLeave(false);
+          return;
+        }
+      }
+
       await api.submitLeave({
         leaveType,
         startDate,
         endDate,
         reason: reason.trim(),
-        attachmentUrl: attachmentFile?.base64Url || undefined,
-        attachmentName: attachmentFile?.fileName || undefined,
+        attachmentUrl: uploadedMeta?.url,
+        attachmentName: uploadedMeta?.fileName,
+        attachmentType: uploadedMeta?.fileType,
+        attachmentSize: uploadedMeta?.fileSize,
+        attachmentId: uploadedMeta?.id,
       });
+
       setShowLeaveForm(false);
       setReason('');
       setStartDate('');
@@ -381,7 +418,11 @@ export const LeaveRequestCard: React.FC = () => {
                           <Paperclip className="w-4 h-4 text-slate-600 shrink-0" />
                           <span className="font-bold text-slate-900 truncate">{attachmentFile.fileName}</span>
                           <span className="text-[10px] text-slate-400">
-                            ({(attachmentFile.fileSize / 1024).toFixed(1)} KB)
+                            (
+                            {attachmentFile.fileSize >= 1024 * 1024
+                              ? `${(attachmentFile.fileSize / (1024 * 1024)).toFixed(1)} MB`
+                              : `${(attachmentFile.fileSize / 1024).toFixed(1)} KB`}
+                            )
                           </span>
                         </div>
                         <button
@@ -395,10 +436,10 @@ export const LeaveRequestCard: React.FC = () => {
                     ) : (
                       <label className="flex items-center justify-center space-x-2 py-3 cursor-pointer text-slate-600 hover:text-slate-900 transition">
                         <Upload className="w-4 h-4 text-slate-400" />
-                        <span className="font-semibold">Upload Doctor's Note / Proof (PDF, JPG, PNG &bull; Max 5MB)</span>
+                        <span className="font-semibold">Upload Doctor's Note / Supporting Document (PDF, JPG, PNG, DOCX)</span>
                         <input
                           type="file"
-                          accept="image/*,.pdf"
+                          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
                           onChange={handleFileUpload}
                           className="hidden"
                         />
@@ -775,7 +816,17 @@ export const LeaveRequestCard: React.FC = () => {
               )}
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex items-center justify-end space-x-2 pt-2">
+              <a
+                href={previewAttachmentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                download
+                className="px-4 py-2 bg-slate-100 text-slate-800 font-bold rounded-xl text-xs hover:bg-slate-200 transition inline-flex items-center space-x-1.5 cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open / Download File</span>
+              </a>
               <button
                 type="button"
                 onClick={() => setPreviewAttachmentUrl(null)}

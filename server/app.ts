@@ -4,6 +4,7 @@ import { authRouter } from './routes/authRoutes';
 import { attendanceRouter } from './routes/attendanceRoutes';
 import { adminRouter } from './routes/adminRoutes';
 import { schedulerRouter } from './routes/schedulerRoutes';
+import { storageRouter } from './routes/storageRoutes';
 import { sitesRepository } from './repositories/sitesRepository';
 import { locationsRepository } from './repositories/locationsRepository';
 import { employeesRepository } from './repositories/employeesRepository';
@@ -11,9 +12,9 @@ import { employeesRepository } from './repositories/employeesRepository';
 export function createExpressApp() {
   const app = express();
 
-  // Middleware for JSON & urlencoded payloads
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  // Middleware for JSON & urlencoded payloads (support up to 20MB for metadata/payloads)
+  app.use(express.json({ limit: '20mb' }));
+  app.use(express.urlencoded({ limit: '20mb', extended: true }));
 
   // URL normalization: support direct calls and Netlify functions rewrites (e.g. /v1/* -> /api/v1/*)
   app.use((req, _res, next) => {
@@ -100,6 +101,7 @@ export function createExpressApp() {
   app.use('/api/v1/admin', adminRouter);
   app.use('/api/v1/scheduler', schedulerRouter);
   app.use('/api/v1/internal', schedulerRouter);
+  app.use('/api/v1/storage', storageRouter);
 
   // 404 handler for unmatched API routes - guarantees API requests never return HTML fallback
   app.all(['/api/*', '/v1/*'], (req, res) => {

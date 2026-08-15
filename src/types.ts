@@ -314,6 +314,8 @@ export interface LeaveRecord {
   attachmentUrl?: string | null;
   attachmentName?: string | null;
   attachmentType?: string | null;
+  attachmentSize?: number | null;
+  attachmentId?: string | null;
   paidDays?: number;
   unpaidDays?: number;
   reviewedByAdminId: string | null;
