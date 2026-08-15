@@ -1,5 +1,12 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import {
+  initializeAuth,
+  getAuth,
+  browserLocalPersistence,
+  indexedDBLocalPersistence,
+  inMemoryPersistence,
+  Auth
+} from 'firebase/auth';
 
 // Milestone Consultancy Firebase Web App Configuration
 const firebaseConfig = {
@@ -15,5 +22,17 @@ const firebaseConfig = {
 // Initialize Firebase App instance safely (singleton pattern)
 export const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firebase Auth instance
-export const auth = getAuth(firebaseApp);
+// Initialize Firebase Auth instance with robust browserLocalPersistence
+// This prevents IndexedDB visibilitychange / pagehide 'Database is closing/hidden' errors.
+let authInstance: Auth;
+try {
+  authInstance = initializeAuth(firebaseApp, {
+    persistence: [browserLocalPersistence, indexedDBLocalPersistence, inMemoryPersistence],
+  });
+} catch {
+  // If already initialized, get the existing instance
+  authInstance = getAuth(firebaseApp);
+}
+
+export const auth = authInstance;
+

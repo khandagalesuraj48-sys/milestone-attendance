@@ -25,27 +25,28 @@ import {
 
 const TOKEN_KEY = 'msc_auth_token_v51';
 
-async function request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+export async function getIdTokenSafe(forceRefresh = false): Promise<string | null> {
   let token = localStorage.getItem(TOKEN_KEY);
-
-  // Validate format of token in storage
   if (token === 'null' || token === 'undefined' || token === '') {
     token = null;
-    localStorage.removeItem(TOKEN_KEY);
   }
 
-  // If currentUser exists in Firebase Auth, refresh token to avoid expiry
   if (auth.currentUser) {
     try {
-      const refreshedToken = await auth.currentUser.getIdToken();
+      const refreshedToken = await auth.currentUser.getIdToken(forceRefresh);
       if (refreshedToken) {
         token = refreshedToken;
         localStorage.setItem(TOKEN_KEY, token);
       }
-    } catch (e) {
-      console.warn('Failed to refresh Firebase ID token:', e);
+    } catch (e: any) {
+      console.warn('Firebase getIdToken note (using cached token):', e?.message || e);
     }
   }
+  return token;
+}
+
+async function request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = await getIdTokenSafe();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -93,24 +94,7 @@ async function request<T = any>(endpoint: string, options: RequestInit = {}): Pr
 }
 
 async function uploadRequest<T = any>(endpoint: string, formData: FormData): Promise<T> {
-  let token = localStorage.getItem(TOKEN_KEY);
-
-  if (token === 'null' || token === 'undefined' || token === '') {
-    token = null;
-    localStorage.removeItem(TOKEN_KEY);
-  }
-
-  if (auth.currentUser) {
-    try {
-      const refreshedToken = await auth.currentUser.getIdToken();
-      if (refreshedToken) {
-        token = refreshedToken;
-        localStorage.setItem(TOKEN_KEY, token);
-      }
-    } catch (e) {
-      console.warn('Failed to refresh Firebase ID token:', e);
-    }
-  }
+  const token = await getIdTokenSafe();
 
   const headers: Record<string, string> = {};
   if (token && token.trim().length > 0) {
@@ -363,6 +347,70 @@ export const api = {
     }
     formData.append('purpose', purpose);
     return uploadRequest('/api/v1/storage/upload', formData);
+  },
+
+  async getAuthenticatedFileUrl(rawUrl: string): Promise<string> {
+    if (!rawUrl) return '';
+    if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) {
+      return rawUrl;
+    }
+    const token = await getIdTokenSafe();
+    const separator = rawUrl.includes('?') ? '&' : '?';
+    return token ? `${rawUrl}${separator}token=${encodeURIComponent(token)}` : rawUrl;
+  },
+
+  async fetchAuthenticatedBlob(rawUrl: string): Promise<{ blob: Blob; objectUrl: string; fileName: string; contentType: string }> {
+    const token = await getIdTokenSafe();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const separator = rawUrl.includes('?') ? '&' : '?';
+    const targetUrl = token && !rawUrl.includes('token=') ? `${rawUrl}${separator}token=${encodeURIComponent(token)}` : rawUrl;
+
+    const res = await fetch(targetUrl, { headers });
+    if (!res.ok) {
+      const errorText = await res.text();
+      let errorMsg = `HTTP ${res.status}`;
+      try {
+        const parsed = JSON.parse(errorText);
+        errorMsg = parsed.message || parsed.error || errorMsg;
+      } catch {
+        if (errorText && !errorText.startsWith('<')) errorMsg = errorText;
+      }
+      throw new Error(errorMsg);
+    }
+
+    const contentType = res.headers.get('content-type') || 'application/octet-stream';
+    const disposition = res.headers.get('content-disposition') || '';
+    let fileName = 'supporting_document';
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    if (match && match[1]) {
+      fileName = decodeURIComponent(match[1]);
+    } else {
+      const parts = rawUrl.split('/');
+      const last = parts[parts.length - 1].split('?')[0];
+      if (last) fileName = decodeURIComponent(last);
+    }
+
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    return { blob, objectUrl, fileName, contentType };
+  },
+
+  async downloadFile(rawUrl: string, fallbackFileName?: string): Promise<void> {
+    const { blob, fileName } = await this.fetchAuthenticatedBlob(rawUrl);
+    const downloadUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = fallbackFileName || fileName || 'document';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    }, 200);
   },
 
   async submitLeave(payload: {

@@ -13,21 +13,19 @@ export interface AuthenticatedRequest extends Request {
  * Firebase Authentication is the single, authoritative authentication system.
  */
 export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  let idToken = '';
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      success: false,
-      error: 'UNAUTHORIZED',
-      message: 'Authentication required. Missing or malformed Authorization header.',
-    });
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    idToken = authHeader.substring(7).trim();
+  } else if (req.query && (req.query.token || req.query.auth)) {
+    idToken = String(req.query.token || req.query.auth).trim();
   }
 
-  const idToken = authHeader.substring(7).trim();
   if (!idToken || idToken === 'null' || idToken === 'undefined') {
     return res.status(401).json({
       success: false,
       error: 'UNAUTHORIZED',
-      message: 'Authentication required. Valid Firebase ID token is required.',
+      message: 'Authentication required. Missing or malformed Authorization header.',
     });
   }
 

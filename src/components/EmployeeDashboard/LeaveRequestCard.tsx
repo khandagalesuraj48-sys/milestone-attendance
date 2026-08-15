@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
 import { LeaveRecord, LeaveBalance, AttendanceRegularizationRequest, Holiday } from '../../types';
+import { SupportingEvidenceModal } from '../common/SupportingEvidenceModal';
 import {
   Calendar,
   Plus,
@@ -785,58 +786,13 @@ export const LeaveRequestCard: React.FC = () => {
         </div>
       )}
 
-      {/* 4. Attachment Preview Modal */}
+      {/* 4. Universal Supporting Evidence Preview Modal */}
       {previewAttachmentUrl && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 space-y-4 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="text-sm font-extrabold text-slate-900">Supporting Evidence Document</h3>
-              <button
-                type="button"
-                onClick={() => setPreviewAttachmentUrl(null)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-100 rounded-2xl p-4">
-              {previewAttachmentUrl.startsWith('data:image') || previewAttachmentUrl.match(/\.(jpeg|jpg|png|gif|webp)/i) ? (
-                <img
-                  src={previewAttachmentUrl}
-                  alt="Supporting Evidence"
-                  className="max-h-[65vh] object-contain rounded-xl shadow-xs"
-                />
-              ) : (
-                <iframe
-                  src={previewAttachmentUrl}
-                  title="Document Preview"
-                  className="w-full h-[60vh] rounded-xl border border-slate-200"
-                />
-              )}
-            </div>
-
-            <div className="flex items-center justify-end space-x-2 pt-2">
-              <a
-                href={previewAttachmentUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                download
-                className="px-4 py-2 bg-slate-100 text-slate-800 font-bold rounded-xl text-xs hover:bg-slate-200 transition inline-flex items-center space-x-1.5 cursor-pointer"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Open / Download File</span>
-              </a>
-              <button
-                type="button"
-                onClick={() => setPreviewAttachmentUrl(null)}
-                className="px-4 py-2 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition cursor-pointer"
-              >
-                Close Preview
-              </button>
-            </div>
-          </div>
-        </div>
+        <SupportingEvidenceModal
+          fileUrl={previewAttachmentUrl}
+          fileName="Supporting_Evidence"
+          onClose={() => setPreviewAttachmentUrl(null)}
+        />
       )}
     </div>
   );
