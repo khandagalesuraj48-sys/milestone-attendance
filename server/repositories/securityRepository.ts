@@ -1,4 +1,10 @@
 import { adminDb } from '../firebaseAdmin';
+import {
+  storageEngine,
+  isRemoteFirestoreActive,
+  markFirestoreUnavailable,
+  isFirestorePermissionOrNetworkError,
+} from '../lib/storageEngine';
 import { SecurityEvent } from '../../src/types';
 
 const COLLECTION = 'securityEvents';
@@ -15,20 +21,42 @@ export const securityRepository = {
       details: event.details,
       resolved: event.resolved ?? false,
     };
-    try {
-      await adminDb.collection(COLLECTION).doc(docId).set(docData);
-    } catch (e) {
-      console.error('Failed to persist security event:', e);
+
+    storageEngine.setDoc(COLLECTION, docId, docData);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(COLLECTION).doc(docId).set(docData);
+      } catch (e: any) {
+        if (isFirestorePermissionOrNetworkError(e)) {
+          markFirestoreUnavailable(e);
+        }
+      }
     }
     return docData;
   },
 
   async getAll(limitCount: number = 100): Promise<SecurityEvent[]> {
-    const snap = await adminDb
-      .collection(COLLECTION)
-      .orderBy('timestamp', 'desc')
-      .limit(limitCount)
-      .get();
-    return snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as SecurityEvent));
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb
+          .collection(COLLECTION)
+          .orderBy('timestamp', 'desc')
+          .limit(limitCount)
+          .get();
+        const list = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as SecurityEvent));
+        for (const s of list) storageEngine.setDoc(COLLECTION, s.id, s);
+        return list;
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    const all = storageEngine.getAllDocs<SecurityEvent>(COLLECTION);
+    return all
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limitCount);
   },
 };

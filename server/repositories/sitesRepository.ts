@@ -1,4 +1,10 @@
 import { adminDb } from '../firebaseAdmin';
+import {
+  storageEngine,
+  isRemoteFirestoreActive,
+  markFirestoreUnavailable,
+  isFirestorePermissionOrNetworkError,
+} from '../lib/storageEngine';
 import { Site } from '../../src/types';
 
 const COLLECTION = 'sites';
@@ -6,19 +12,57 @@ const COLLECTION = 'sites';
 export const sitesRepository = {
   async getById(siteId: string): Promise<Site | null> {
     const clean = siteId.trim();
-    const doc = await adminDb.collection(COLLECTION).doc(clean).get();
-    if (!doc.exists) return null;
-    return { ...doc.data(), siteId: doc.id } as Site;
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        const doc = await adminDb.collection(COLLECTION).doc(clean).get();
+        if (doc.exists) {
+          const site = { ...doc.data(), siteId: doc.id } as Site;
+          storageEngine.setDoc(COLLECTION, clean, site);
+          return site;
+        }
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    return storageEngine.getDoc<Site>(COLLECTION, clean);
   },
 
   async getAll(): Promise<Site[]> {
-    const snap = await adminDb.collection(COLLECTION).get();
-    return snap.docs.map((doc) => ({ ...doc.data(), siteId: doc.id } as Site));
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb.collection(COLLECTION).get();
+        const list = snap.docs.map((doc) => ({ ...doc.data(), siteId: doc.id } as Site));
+        for (const s of list) storageEngine.setDoc(COLLECTION, s.siteId, s);
+        return list;
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    return storageEngine.getAllDocs<Site>(COLLECTION);
   },
 
   async getActive(): Promise<Site[]> {
-    const snap = await adminDb.collection(COLLECTION).where('isActive', '==', true).get();
-    return snap.docs.map((doc) => ({ ...doc.data(), siteId: doc.id } as Site));
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb.collection(COLLECTION).where('isActive', '==', true).get();
+        const list = snap.docs.map((doc) => ({ ...doc.data(), siteId: doc.id } as Site));
+        for (const s of list) storageEngine.setDoc(COLLECTION, s.siteId, s);
+        return list;
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    return storageEngine.queryDocs<Site>(COLLECTION, (s) => s.isActive !== false);
   },
 
   async create(site: Site): Promise<Site> {
@@ -29,7 +73,19 @@ export const sitesRepository = {
       createdAt: site.createdAt || new Date().toISOString(),
       updatedAt: site.updatedAt || new Date().toISOString(),
     };
-    await adminDb.collection(COLLECTION).doc(cleanId).set(docData);
+
+    storageEngine.setDoc(COLLECTION, cleanId, docData);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(COLLECTION).doc(cleanId).set(docData);
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
     return docData;
   },
 
@@ -39,6 +95,17 @@ export const sitesRepository = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    await adminDb.collection(COLLECTION).doc(clean).set(payload, { merge: true });
+
+    storageEngine.updateDoc(COLLECTION, clean, payload);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(COLLECTION).doc(clean).set(payload, { merge: true });
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
   },
 };

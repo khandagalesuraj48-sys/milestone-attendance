@@ -1,28 +1,79 @@
 import { adminDb } from '../firebaseAdmin';
+import {
+  storageEngine,
+  isRemoteFirestoreActive,
+  markFirestoreUnavailable,
+  isFirestorePermissionOrNetworkError,
+} from '../lib/storageEngine';
 import { LeaveRecord } from '../../src/types';
 
 const COLLECTION = 'leaveRecords';
 
 export const leavesRepository = {
   async getById(id: string): Promise<LeaveRecord | null> {
-    const doc = await adminDb.collection(COLLECTION).doc(id).get();
-    if (!doc.exists) return null;
-    return { ...doc.data(), id: doc.id } as LeaveRecord;
+    if (isRemoteFirestoreActive()) {
+      try {
+        const doc = await adminDb.collection(COLLECTION).doc(id).get();
+        if (doc.exists) {
+          const leave = { ...doc.data(), id: doc.id } as LeaveRecord;
+          storageEngine.setDoc(COLLECTION, id, leave);
+          return leave;
+        }
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    const local = storageEngine.getDoc<LeaveRecord>(COLLECTION, id);
+    if (local) return local;
+
+    const all = storageEngine.getAllDocs<LeaveRecord>(COLLECTION);
+    return all.find((l) => l.id === id) || null;
   },
 
   async getByEmployeeId(employeeId: string): Promise<LeaveRecord[]> {
     const clean = employeeId.trim().toUpperCase();
-    const snap = await adminDb
-      .collection(COLLECTION)
-      .where('employeeId', '==', clean)
-      .get();
-    const list = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as LeaveRecord));
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb
+          .collection(COLLECTION)
+          .where('employeeId', '==', clean)
+          .get();
+        const list = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as LeaveRecord));
+        for (const l of list) storageEngine.setDoc(COLLECTION, l.id, l);
+        return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    const list = storageEngine.queryDocs<LeaveRecord>(
+      COLLECTION,
+      (l) => (l.employeeId || '').toUpperCase() === clean
+    );
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
 
   async getAll(): Promise<LeaveRecord[]> {
-    const snap = await adminDb.collection(COLLECTION).get();
-    const list = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as LeaveRecord));
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb.collection(COLLECTION).get();
+        const list = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as LeaveRecord));
+        for (const l of list) storageEngine.setDoc(COLLECTION, l.id, l);
+        return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    const list = storageEngine.getAllDocs<LeaveRecord>(COLLECTION);
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
 
@@ -34,7 +85,19 @@ export const leavesRepository = {
       createdAt: leave.createdAt || new Date().toISOString(),
       updatedAt: leave.updatedAt || new Date().toISOString(),
     };
-    await adminDb.collection(COLLECTION).doc(docId).set(docData);
+
+    storageEngine.setDoc(COLLECTION, docId, docData);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(COLLECTION).doc(docId).set(docData);
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
     return docData;
   },
 
@@ -43,6 +106,17 @@ export const leavesRepository = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    await adminDb.collection(COLLECTION).doc(id).set(payload, { merge: true });
+
+    storageEngine.updateDoc(COLLECTION, id, payload);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(COLLECTION).doc(id).set(payload, { merge: true });
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
   },
 };

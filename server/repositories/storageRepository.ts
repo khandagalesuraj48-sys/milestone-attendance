@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { adminDb, getAdminStorageBucket, storageBucketName } from '../firebaseAdmin';
+import {
+  storageEngine,
+  isRemoteFirestoreActive,
+  markFirestoreUnavailable,
+  isFirestorePermissionOrNetworkError,
+} from '../lib/storageEngine';
 
 const COLLECTION = 'uploadedFiles';
 
@@ -88,7 +94,6 @@ export const storageRepository = {
           await bucketFile.makePublic();
           storageUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
         } catch (pubErr) {
-          // If makePublic is restricted by bucket policy, use signed url or API proxy route
           try {
             const [signedUrl] = await bucketFile.getSignedUrl({
               action: 'read',
@@ -104,7 +109,7 @@ export const storageRepository = {
       console.warn(`[StorageRepository] Firebase Storage bucket save warning (${gcsErr?.message}), ensuring fallback...`);
     }
 
-    // 2. Cache locally to tmp
+    // 2. Cache locally to tmp / uploads
     try {
       if (!fs.existsSync(UPLOADS_DIR)) {
         fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -133,43 +138,46 @@ export const storageRepository = {
       updatedAt: new Date().toISOString(),
     };
 
-    // 4. Save metadata and resilient fallback data in Firestore
-    try {
-      const docPayload: any = { ...metadata };
-      // Files <= 700KB stored as embedded base64 in Firestore for instantaneous cross-container availability
-      if (params.buffer.length <= 700 * 1024) {
-        docPayload.base64Data = params.buffer.toString('base64');
-      }
-      await adminDb.collection(COLLECTION).doc(fileId).set(docPayload);
+    if (params.buffer.length <= 700 * 1024) {
+      metadata.base64Data = params.buffer.toString('base64');
+    }
 
-      // If cloud upload wasn't available and file is > 700KB, store chunks in Firestore sub-collection
-      if (!isCloudUploaded && params.buffer.length > 700 * 1024) {
-        const chunkSize = 500 * 1024; // 500KB per chunk
-        const totalChunks = Math.ceil(params.buffer.length / chunkSize);
-        const batch = adminDb.batch();
-        for (let i = 0; i < totalChunks; i++) {
-          const start = i * chunkSize;
-          const end = Math.min(start + chunkSize, params.buffer.length);
-          const chunkBuffer = params.buffer.subarray(start, end);
-          const chunkRef = adminDb.collection(COLLECTION).doc(fileId).collection('chunks').doc(String(i));
-          batch.set(chunkRef, {
-            chunkIndex: i,
-            totalChunks,
-            data: chunkBuffer.toString('base64'),
-          });
+    storageEngine.setDoc(COLLECTION, fileId, metadata);
+
+    // 4. Save metadata and fallback data in Firestore if active
+    if (isRemoteFirestoreActive()) {
+      try {
+        const docPayload: any = { ...metadata };
+        await adminDb.collection(COLLECTION).doc(fileId).set(docPayload);
+
+        // If cloud upload wasn't available and file is > 700KB, store chunks in Firestore sub-collection
+        if (!isCloudUploaded && params.buffer.length > 700 * 1024) {
+          const chunkSize = 500 * 1024; // 500KB per chunk
+          const totalChunks = Math.ceil(params.buffer.length / chunkSize);
+          const batch = adminDb.batch();
+          for (let i = 0; i < totalChunks; i++) {
+            const start = i * chunkSize;
+            const end = Math.min(start + chunkSize, params.buffer.length);
+            const chunkBuffer = params.buffer.subarray(start, end);
+            const chunkRef = adminDb.collection(COLLECTION).doc(fileId).collection('chunks').doc(String(i));
+            batch.set(chunkRef, {
+              chunkIndex: i,
+              totalChunks,
+              data: chunkBuffer.toString('base64'),
+            });
+          }
+          await batch.commit();
         }
-        await batch.commit();
+      } catch (dbErr: any) {
+        if (isFirestorePermissionOrNetworkError(dbErr)) {
+          markFirestoreUnavailable(dbErr);
+        }
       }
-    } catch (dbErr) {
-      console.warn('[StorageRepository] Firestore metadata save warning:', dbErr);
     }
 
     return metadata;
   },
 
-  /**
-   * Generates a signed upload URL from Firebase Storage for direct client-to-storage upload
-   */
   async createSignedUploadUrl(params: {
     fileName: string;
     fileType: string;
@@ -210,9 +218,6 @@ export const storageRepository = {
     }
   },
 
-  /**
-   * Commit metadata after direct client-to-storage upload
-   */
   async commitDirectUpload(params: {
     fileId: string;
     fileName: string;
@@ -240,19 +245,39 @@ export const storageRepository = {
       updatedAt: new Date().toISOString(),
     };
 
-    await adminDb.collection(COLLECTION).doc(params.fileId).set(metadata);
+    storageEngine.setDoc(COLLECTION, params.fileId, metadata);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(COLLECTION).doc(params.fileId).set(metadata);
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
     return metadata;
   },
 
   async getById(id: string): Promise<UploadedFileMetadata | null> {
-    try {
-      const doc = await adminDb.collection(COLLECTION).doc(id).get();
-      if (doc.exists) {
-        return { ...doc.data(), id: doc.id } as UploadedFileMetadata;
+    if (isRemoteFirestoreActive()) {
+      try {
+        const doc = await adminDb.collection(COLLECTION).doc(id).get();
+        if (doc.exists) {
+          const meta = { ...doc.data(), id: doc.id } as UploadedFileMetadata;
+          storageEngine.setDoc(COLLECTION, id, meta);
+          return meta;
+        }
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
       }
-    } catch (err) {
-      console.warn('[StorageRepository] Firestore fetch error:', err);
     }
+
+    const local = storageEngine.getDoc<UploadedFileMetadata>(COLLECTION, id);
+    if (local) return local;
 
     // Disk lookup fallback
     try {
@@ -271,7 +296,7 @@ export const storageRepository = {
           else if (ext === '.gif') mimeType = 'image/gif';
           else if (ext === '.pdf') mimeType = 'application/pdf';
 
-          return {
+          const item: UploadedFileMetadata = {
             id,
             fileName: originalName,
             fileType: mimeType,
@@ -283,6 +308,8 @@ export const storageRepository = {
             createdAt: stats.birthtime.toISOString(),
             updatedAt: stats.mtime.toISOString(),
           };
+          storageEngine.setDoc(COLLECTION, id, item);
+          return item;
         }
       }
     } catch (fsErr) {
@@ -301,7 +328,6 @@ export const storageRepository = {
         const [exists] = await bucketFile.exists();
         if (exists) {
           const [downloadedBuffer] = await bucketFile.download();
-          // Cache in /tmp
           try {
             if (metadata.diskPath) {
               await fs.promises.writeFile(metadata.diskPath, downloadedBuffer);
@@ -332,28 +358,32 @@ export const storageRepository = {
       }
     }
 
-    // 4. Check Firestore chunks for large files
-    try {
-      const chunksSnap = await adminDb
-        .collection(COLLECTION)
-        .doc(metadata.id)
-        .collection('chunks')
-        .orderBy('chunkIndex')
-        .get();
+    // 4. Check Firestore chunks for large files if active
+    if (isRemoteFirestoreActive()) {
+      try {
+        const chunksSnap = await adminDb
+          .collection(COLLECTION)
+          .doc(metadata.id)
+          .collection('chunks')
+          .orderBy('chunkIndex')
+          .get();
 
-      if (!chunksSnap.empty) {
-        const buffers: Buffer[] = [];
-        chunksSnap.forEach((doc) => {
-          const chunkData = doc.data();
-          if (chunkData.data) {
-            buffers.push(Buffer.from(chunkData.data, 'base64'));
-          }
-        });
-        const combined = Buffer.concat(buffers);
-        return combined;
+        if (!chunksSnap.empty) {
+          const buffers: Buffer[] = [];
+          chunksSnap.forEach((doc) => {
+            const chunkData = doc.data();
+            if (chunkData.data) {
+              buffers.push(Buffer.from(chunkData.data, 'base64'));
+            }
+          });
+          const combined = Buffer.concat(buffers);
+          return combined;
+        }
+      } catch (chunksErr: any) {
+        if (isFirestorePermissionOrNetworkError(chunksErr)) {
+          markFirestoreUnavailable(chunksErr);
+        }
       }
-    } catch (chunksErr) {
-      console.error('[StorageRepository] Chunks retrieve error:', chunksErr);
     }
 
     return null;
@@ -373,7 +403,18 @@ export const storageRepository = {
           await fs.promises.unlink(meta.diskPath);
         } catch (e) {}
       }
-      await adminDb.collection(COLLECTION).doc(id).delete();
+
+      storageEngine.deleteDoc(COLLECTION, id);
+
+      if (isRemoteFirestoreActive()) {
+        try {
+          await adminDb.collection(COLLECTION).doc(id).delete();
+        } catch (err: any) {
+          if (isFirestorePermissionOrNetworkError(err)) {
+            markFirestoreUnavailable(err);
+          }
+        }
+      }
       return true;
     } catch (err) {
       console.error('[StorageRepository] Delete file error:', err);

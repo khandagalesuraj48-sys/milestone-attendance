@@ -1,4 +1,10 @@
 import { adminDb } from '../firebaseAdmin';
+import {
+  storageEngine,
+  isRemoteFirestoreActive,
+  markFirestoreUnavailable,
+  isFirestorePermissionOrNetworkError,
+} from '../lib/storageEngine';
 import { PayrollRun, PayrollItem, SalarySlip } from '../../src/types';
 
 const RUNS_COLLECTION = 'payroll_runs';
@@ -6,72 +12,154 @@ const ITEMS_COLLECTION = 'payroll_items';
 
 export const payrollRepository = {
   async getAllRuns(): Promise<PayrollRun[]> {
-    const snap = await adminDb.collection(RUNS_COLLECTION).orderBy('month', 'desc').get();
-    return snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as PayrollRun));
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb.collection(RUNS_COLLECTION).orderBy('month', 'desc').get();
+        const list = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as PayrollRun));
+        for (const r of list) storageEngine.setDoc(RUNS_COLLECTION, r.id, r);
+        return list;
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    const list = storageEngine.getAllDocs<PayrollRun>(RUNS_COLLECTION);
+    return list.sort((a, b) => b.month.localeCompare(a.month));
   },
 
   async getRunById(id: string): Promise<PayrollRun | null> {
-    const doc = await adminDb.collection(RUNS_COLLECTION).doc(id).get();
-    if (!doc.exists) return null;
-    const run = { ...doc.data(), id: doc.id } as PayrollRun;
+    if (isRemoteFirestoreActive()) {
+      try {
+        const doc = await adminDb.collection(RUNS_COLLECTION).doc(id).get();
+        if (doc.exists) {
+          const run = { ...doc.data(), id: doc.id } as PayrollRun;
+          const itemsSnap = await adminDb.collection(ITEMS_COLLECTION).where('payrollRunId', '==', id).get();
+          run.items = itemsSnap.docs.map((d) => ({ ...d.data(), id: d.id } as PayrollItem));
+          storageEngine.setDoc(RUNS_COLLECTION, id, run);
+          for (const it of run.items) storageEngine.setDoc(ITEMS_COLLECTION, it.id, it);
+          return run;
+        }
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
 
-    const itemsSnap = await adminDb.collection(ITEMS_COLLECTION).where('payrollRunId', '==', id).get();
-    run.items = itemsSnap.docs.map((d) => ({ ...d.data(), id: d.id } as PayrollItem));
+    const run = storageEngine.getDoc<PayrollRun>(RUNS_COLLECTION, id);
+    if (!run) return null;
+    run.items = storageEngine.queryDocs<PayrollItem>(ITEMS_COLLECTION, (it) => it.payrollRunId === id);
     return run;
   },
 
   async getRunByMonth(month: string): Promise<PayrollRun | null> {
-    const snap = await adminDb.collection(RUNS_COLLECTION).where('month', '==', month).limit(1).get();
-    if (snap.empty) return null;
-    const doc = snap.docs[0];
-    const run = { ...doc.data(), id: doc.id } as PayrollRun;
-    const itemsSnap = await adminDb.collection(ITEMS_COLLECTION).where('payrollRunId', '==', run.id).get();
-    run.items = itemsSnap.docs.map((d) => ({ ...d.data(), id: d.id } as PayrollItem));
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb.collection(RUNS_COLLECTION).where('month', '==', month).limit(1).get();
+        if (!snap.empty) {
+          const doc = snap.docs[0];
+          const run = { ...doc.data(), id: doc.id } as PayrollRun;
+          const itemsSnap = await adminDb.collection(ITEMS_COLLECTION).where('payrollRunId', '==', run.id).get();
+          run.items = itemsSnap.docs.map((d) => ({ ...d.data(), id: d.id } as PayrollItem));
+          storageEngine.setDoc(RUNS_COLLECTION, run.id, run);
+          for (const it of run.items) storageEngine.setDoc(ITEMS_COLLECTION, it.id, it);
+          return run;
+        }
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    const run = storageEngine.findDoc<PayrollRun>(RUNS_COLLECTION, (r) => r.month === month);
+    if (!run) return null;
+    run.items = storageEngine.queryDocs<PayrollItem>(ITEMS_COLLECTION, (it) => it.payrollRunId === run.id);
     return run;
   },
 
   async saveRun(run: PayrollRun, items: PayrollItem[]): Promise<PayrollRun> {
-    const batch = adminDb.batch();
-    const runRef = adminDb.collection(RUNS_COLLECTION).doc(run.id);
-
     const { items: _, ...runData } = run;
-    batch.set(runRef, {
+    storageEngine.setDoc(RUNS_COLLECTION, run.id, {
       ...runData,
       updatedAt: new Date().toISOString(),
     });
 
     for (const item of items) {
-      const itemRef = adminDb.collection(ITEMS_COLLECTION).doc(item.id);
-      batch.set(itemRef, {
+      storageEngine.setDoc(ITEMS_COLLECTION, item.id, {
         ...item,
         updatedAt: new Date().toISOString(),
       });
     }
 
-    await batch.commit();
+    if (isRemoteFirestoreActive()) {
+      try {
+        const batch = adminDb.batch();
+        const runRef = adminDb.collection(RUNS_COLLECTION).doc(run.id);
+
+        batch.set(runRef, {
+          ...runData,
+          updatedAt: new Date().toISOString(),
+        });
+
+        for (const item of items) {
+          const itemRef = adminDb.collection(ITEMS_COLLECTION).doc(item.id);
+          batch.set(itemRef, {
+            ...item,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        await batch.commit();
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
     return { ...run, items };
   },
 
   async updateRun(id: string, updates: Partial<PayrollRun>): Promise<void> {
-    await adminDb.collection(RUNS_COLLECTION).doc(id).set(
-      {
-        ...updates,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
-  },
-
-  async updateItem(runId: string, itemId: string, updates: Partial<PayrollItem>): Promise<PayrollItem | null> {
-    const itemRef = adminDb.collection(ITEMS_COLLECTION).doc(itemId);
-    const doc = await itemRef.get();
-    if (!doc.exists) return null;
-
     const payload = {
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    await itemRef.set(payload, { merge: true });
+
+    storageEngine.updateDoc(RUNS_COLLECTION, id, payload);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(RUNS_COLLECTION).doc(id).set(payload, { merge: true });
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+  },
+
+  async updateItem(runId: string, itemId: string, updates: Partial<PayrollItem>): Promise<PayrollItem | null> {
+    const payload = {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    storageEngine.updateDoc(ITEMS_COLLECTION, itemId, payload);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        const itemRef = adminDb.collection(ITEMS_COLLECTION).doc(itemId);
+        await itemRef.set(payload, { merge: true });
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
 
     // Recalculate run totals
     const run = await this.getRunById(runId);
@@ -87,46 +175,72 @@ export const payrollRepository = {
       });
     }
 
-    const updatedDoc = await itemRef.get();
-    return { ...updatedDoc.data(), id: updatedDoc.id } as PayrollItem;
+    return storageEngine.getDoc<PayrollItem>(ITEMS_COLLECTION, itemId);
   },
 
   async deleteRun(id: string): Promise<void> {
-    const itemsSnap = await adminDb.collection(ITEMS_COLLECTION).where('payrollRunId', '==', id).get();
-    const batch = adminDb.batch();
-    for (const doc of itemsSnap.docs) {
-      batch.delete(doc.ref);
+    const items = storageEngine.queryDocs<PayrollItem>(ITEMS_COLLECTION, (it) => it.payrollRunId === id);
+    for (const it of items) storageEngine.deleteDoc(ITEMS_COLLECTION, it.id);
+    storageEngine.deleteDoc(RUNS_COLLECTION, id);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        const itemsSnap = await adminDb.collection(ITEMS_COLLECTION).where('payrollRunId', '==', id).get();
+        const batch = adminDb.batch();
+        for (const doc of itemsSnap.docs) {
+          batch.delete(doc.ref);
+        }
+        batch.delete(adminDb.collection(RUNS_COLLECTION).doc(id));
+        await batch.commit();
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
     }
-    batch.delete(adminDb.collection(RUNS_COLLECTION).doc(id));
-    await batch.commit();
   },
 
   async getPublishedSlipsForEmployee(employeeId: string): Promise<PayrollItem[]> {
     const cleanEmpId = employeeId.trim().toUpperCase();
-    const snap = await adminDb
-      .collection(ITEMS_COLLECTION)
-      .where('employeeId', '==', cleanEmpId)
-      .where('paymentStatus', 'in', ['PAID', 'UNPAID'])
-      .get();
 
-    // Filter to only those whose parent run is published
-    const runsSnap = await adminDb.collection(RUNS_COLLECTION).where('status', '==', 'PUBLISHED').get();
-    const publishedRunIds = new Set(runsSnap.docs.map((d) => d.id));
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb
+          .collection(ITEMS_COLLECTION)
+          .where('employeeId', '==', cleanEmpId)
+          .where('paymentStatus', 'in', ['PAID', 'UNPAID'])
+          .get();
 
-    return snap.docs
-      .map((d) => ({ ...d.data(), id: d.id } as PayrollItem))
-      .filter((item) => publishedRunIds.has(item.payrollRunId))
-      .sort((a, b) => b.month.localeCompare(a.month));
+        const runsSnap = await adminDb.collection(RUNS_COLLECTION).where('status', '==', 'PUBLISHED').get();
+        const publishedRunIds = new Set(runsSnap.docs.map((d) => d.id));
+
+        return snap.docs
+          .map((d) => ({ ...d.data(), id: d.id } as PayrollItem))
+          .filter((item) => publishedRunIds.has(item.payrollRunId))
+          .sort((a, b) => b.month.localeCompare(a.month));
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    const publishedRuns = storageEngine.queryDocs<PayrollRun>(RUNS_COLLECTION, (r) => r.status === 'PUBLISHED');
+    const publishedRunIds = new Set(publishedRuns.map((r) => r.id));
+
+    const items = storageEngine.queryDocs<PayrollItem>(
+      ITEMS_COLLECTION,
+      (it) => (it.employeeId || '').toUpperCase() === cleanEmpId && publishedRunIds.has(it.payrollRunId)
+    );
+    return items.sort((a, b) => b.month.localeCompare(a.month));
   },
 
   async getSlipById(itemId: string): Promise<SalarySlip | null> {
-    const doc = await adminDb.collection(ITEMS_COLLECTION).doc(itemId).get();
-    if (!doc.exists) return null;
-    const item = { ...doc.data(), id: doc.id } as PayrollItem;
+    const item = storageEngine.getDoc<PayrollItem>(ITEMS_COLLECTION, itemId);
+    if (!item) return null;
 
-    const runDoc = await adminDb.collection(RUNS_COLLECTION).doc(item.payrollRunId).get();
-    if (!runDoc.exists) return null;
-    const run = runDoc.data() as PayrollRun;
+    const run = storageEngine.getDoc<PayrollRun>(RUNS_COLLECTION, item.payrollRunId);
+    if (!run) return null;
 
     const slip: SalarySlip = {
       ...item,
