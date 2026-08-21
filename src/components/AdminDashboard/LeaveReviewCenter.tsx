@@ -54,28 +54,68 @@ export const LeaveReviewCenter: React.FC = () => {
   const [previewAttachmentName, setPreviewAttachmentName] = useState<string | undefined>(undefined);
 
   // Toast
-  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [lastKnownLeaveIds, setLastKnownLeaveIds] = useState<Set<string>>(new Set());
+  const [lastKnownRegIds, setLastKnownRegIds] = useState<Set<string>>(new Set());
 
-  const fetchAllData = async () => {
+  const fetchAllData = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [leavesRes, regRes, balRes] = await Promise.all([
         api.getAllLeaves(),
         api.getAdminRegularizations(),
         api.getAdminLeaveBalances(),
       ]);
-      setLeaves(leavesRes.leaves || []);
-      setRegularizations(regRes.requests || []);
+
+      const fetchedLeaves: LeaveRecord[] = leavesRes.leaves || [];
+      const fetchedRegs: AttendanceRegularizationRequest[] = regRes.requests || [];
+
+      // Check if new pending items arrived during background live polling
+      if (silent && lastKnownLeaveIds.size > 0) {
+        const newPendingLeaves = fetchedLeaves.filter(
+          (l) => l.status === 'PENDING' && !lastKnownLeaveIds.has(l.id)
+        );
+        if (newPendingLeaves.length > 0) {
+          const first = newPendingLeaves[0];
+          setToastMessage({
+            type: 'info',
+            text: `✨ New Leave Application Received: ${first.employeeName || first.employeeId} applied for ${first.leaveType} (${first.totalDays || 1} day).`,
+          });
+        }
+
+        const newPendingRegs = fetchedRegs.filter(
+          (r) => r.status === 'PENDING' && !lastKnownRegIds.has(r.id)
+        );
+        if (newPendingRegs.length > 0) {
+          const first = newPendingRegs[0];
+          setToastMessage({
+            type: 'info',
+            text: `✨ New Regularization Request: ${first.employeeName || first.employeeId} requested attendance adjustment.`,
+          });
+        }
+      }
+
+      setLastKnownLeaveIds(new Set(fetchedLeaves.map((l) => l.id)));
+      setLastKnownRegIds(new Set(fetchedRegs.map((r) => r.id)));
+      setLeaves(fetchedLeaves);
+      setRegularizations(fetchedRegs);
       setBalances(balRes.balances || []);
     } catch (err: any) {
-      setToastMessage({ type: 'error', text: err.message || 'Failed to load leave records.' });
+      if (!silent) {
+        setToastMessage({ type: 'error', text: err.message || 'Failed to load leave records.' });
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAllData();
+    fetchAllData(false);
+    // Real-time live polling interval for instant detection of employee submissions
+    const liveInterval = setInterval(() => {
+      fetchAllData(true);
+    }, 6000);
+    return () => clearInterval(liveInterval);
   }, []);
 
   const handleOpenReview = (type: 'LEAVE' | 'REGULARIZATION', item: any) => {
@@ -171,31 +211,42 @@ export const LeaveReviewCenter: React.FC = () => {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={fetchAllData}
-          disabled={loading}
-          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-xl text-xs flex items-center space-x-2 transition cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh Records</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <div className="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Live Sync Active</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fetchAllData(false)}
+            disabled={loading}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-xl text-xs flex items-center space-x-2 transition cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh Records</span>
+          </button>
+        </div>
       </div>
 
       {toastMessage && (
         <div
-          className={`p-4 rounded-2xl border text-xs flex items-center space-x-3 ${
+          className={`p-4 rounded-2xl border text-xs flex items-center space-x-3 transition duration-150 ${
             toastMessage.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : toastMessage.type === 'info'
+              ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-sm'
               : 'bg-rose-50 border-rose-200 text-rose-900'
           }`}
         >
           {toastMessage.type === 'success' ? (
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          ) : toastMessage.type === 'info' ? (
+            <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
           ) : (
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
           )}
-          <span className="font-medium">{toastMessage.text}</span>
+          <span className="font-semibold">{toastMessage.text}</span>
         </div>
       )}
 

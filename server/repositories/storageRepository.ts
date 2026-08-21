@@ -1,11 +1,10 @@
 import fs from 'fs';
 import path from 'path';
-import { adminDb } from '../firebaseAdmin';
+import { adminDb, getAdminStorageBucket, storageBucketName } from '../firebaseAdmin';
 
 const COLLECTION = 'uploadedFiles';
-const CHUNKS_COLLECTION = 'uploadedFileChunks';
 
-// Determine writeable uploads directory for both Container and AWS Lambda / Netlify Serverless environments
+// Determine writeable local cache directory for temp caching
 const isServerless = Boolean(process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
 const UPLOADS_DIR = isServerless ? path.join('/tmp', 'uploads') : path.join(process.cwd(), 'uploads');
 
@@ -14,7 +13,7 @@ try {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 } catch (e) {
-  console.warn('[StorageRepository] Directory creation warning:', e);
+  console.warn('[StorageRepository] Cache directory creation warning:', e);
 }
 
 export interface UploadedFileMetadata {
@@ -22,18 +21,24 @@ export interface UploadedFileMetadata {
   fileName: string;
   fileType: string;
   fileSize: number;
-  diskPath: string;
+  diskPath?: string;
+  storagePath?: string;
+  storageBucket?: string;
+  storageUrl?: string;
   uploadedBy: string;
   uploadedByName?: string;
   uploadedByRole?: string;
   purpose: 'leave_attachment' | 'profile_photo' | 'general';
   url: string;
-  base64Data?: string; // Stored for files <= 700KB for instant cross-serverless availability
+  base64Data?: string; // Stored for small files / avatars <= 700KB as resilient instant fallback
   createdAt: string;
   updatedAt: string;
 }
 
 export const storageRepository = {
+  /**
+   * Save file buffer persistently to Firebase Cloud Storage bucket + Firestore metadata
+   */
   async saveFile(params: {
     id?: string;
     fileName: string;
@@ -47,45 +52,98 @@ export const storageRepository = {
   }): Promise<UploadedFileMetadata> {
     const fileId = params.id || `file_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const sanitizedName = params.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const purpose = params.purpose || 'general';
+    const employeeId = params.uploadedBy || 'system';
+    const storagePath = `uploads/${purpose}/${employeeId}/${fileId}-${sanitizedName}`;
     const diskFileName = `${fileId}_${sanitizedName}`;
     const diskPath = path.join(UPLOADS_DIR, diskFileName);
 
-    // Save physical file to disk/tmp
+    let storageUrl = `/api/v1/storage/file/${fileId}`;
+    let isCloudUploaded = false;
+
+    // 1. Upload directly to Firebase Cloud Storage bucket
+    try {
+      const bucket = getAdminStorageBucket();
+      const bucketFile = bucket.file(storagePath);
+
+      await bucketFile.save(params.buffer, {
+        contentType: params.fileType || 'application/octet-stream',
+        metadata: {
+          contentType: params.fileType || 'application/octet-stream',
+          metadata: {
+            originalName: params.fileName,
+            uploadedBy: params.uploadedBy,
+            purpose,
+            fileId,
+          },
+        },
+      });
+
+      isCloudUploaded = true;
+      console.log(`[StorageRepository] File successfully saved to Firebase Storage bucket at ${storagePath}`);
+
+      // Attempt to make public or get public URL if profile photo
+      if (purpose === 'profile_photo') {
+        try {
+          await bucketFile.makePublic();
+          storageUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        } catch (pubErr) {
+          // If makePublic is restricted by bucket policy, use signed url or API proxy route
+          try {
+            const [signedUrl] = await bucketFile.getSignedUrl({
+              action: 'read',
+              expires: Date.now() + 1000 * 60 * 60 * 24 * 365, // 1 year
+            });
+            storageUrl = signedUrl;
+          } catch {
+            storageUrl = `/api/v1/storage/file/${fileId}`;
+          }
+        }
+      }
+    } catch (gcsErr: any) {
+      console.warn(`[StorageRepository] Firebase Storage bucket save warning (${gcsErr?.message}), ensuring fallback...`);
+    }
+
+    // 2. Cache locally to tmp
     try {
       if (!fs.existsSync(UPLOADS_DIR)) {
         fs.mkdirSync(UPLOADS_DIR, { recursive: true });
       }
       await fs.promises.writeFile(diskPath, params.buffer);
     } catch (fsWriteErr) {
-      console.warn('[StorageRepository] Disk write warning (falling back to Firestore):', fsWriteErr);
+      console.warn('[StorageRepository] Disk cache write warning:', fsWriteErr);
     }
 
+    // 3. Construct authoritative metadata
     const metadata: UploadedFileMetadata = {
       id: fileId,
       fileName: params.fileName,
       fileType: params.fileType || 'application/octet-stream',
       fileSize: params.fileSize,
       diskPath,
+      storagePath: isCloudUploaded ? storagePath : undefined,
+      storageBucket: isCloudUploaded ? storageBucketName : undefined,
+      storageUrl,
       uploadedBy: params.uploadedBy,
       uploadedByName: params.uploadedByName || 'Unknown',
       uploadedByRole: params.uploadedByRole || 'employee',
-      purpose: params.purpose || 'general',
+      purpose,
       url: `/api/v1/storage/file/${fileId}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    // Store in Firestore for persistent multi-instance/serverless reliability
+    // 4. Save metadata and resilient fallback data in Firestore
     try {
       const docPayload: any = { ...metadata };
+      // Files <= 700KB stored as embedded base64 in Firestore for instantaneous cross-container availability
       if (params.buffer.length <= 700 * 1024) {
-        // Files <= 700KB stored directly in main doc
         docPayload.base64Data = params.buffer.toString('base64');
       }
       await adminDb.collection(COLLECTION).doc(fileId).set(docPayload);
 
-      // For larger files > 700KB, store chunks in sub-documents
-      if (params.buffer.length > 700 * 1024) {
+      // If cloud upload wasn't available and file is > 700KB, store chunks in Firestore sub-collection
+      if (!isCloudUploaded && params.buffer.length > 700 * 1024) {
         const chunkSize = 500 * 1024; // 500KB per chunk
         const totalChunks = Math.ceil(params.buffer.length / chunkSize);
         const batch = adminDb.batch();
@@ -106,6 +164,83 @@ export const storageRepository = {
       console.warn('[StorageRepository] Firestore metadata save warning:', dbErr);
     }
 
+    return metadata;
+  },
+
+  /**
+   * Generates a signed upload URL from Firebase Storage for direct client-to-storage upload
+   */
+  async createSignedUploadUrl(params: {
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+    uploadedBy: string;
+    purpose?: 'leave_attachment' | 'profile_photo' | 'general';
+  }): Promise<{
+    fileId: string;
+    storagePath: string;
+    uploadUrl: string;
+    downloadUrl: string;
+  } | null> {
+    try {
+      const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const sanitizedName = params.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const purpose = params.purpose || 'general';
+      const employeeId = params.uploadedBy || 'system';
+      const storagePath = `uploads/${purpose}/${employeeId}/${fileId}-${sanitizedName}`;
+
+      const bucket = getAdminStorageBucket();
+      const bucketFile = bucket.file(storagePath);
+
+      const [uploadUrl] = await bucketFile.getSignedUrl({
+        action: 'write',
+        expires: Date.now() + 20 * 60 * 1000, // 20 minutes
+        contentType: params.fileType || 'application/octet-stream',
+      });
+
+      return {
+        fileId,
+        storagePath,
+        uploadUrl,
+        downloadUrl: `/api/v1/storage/file/${fileId}`,
+      };
+    } catch (err) {
+      console.warn('[StorageRepository] createSignedUploadUrl warning:', err);
+      return null;
+    }
+  },
+
+  /**
+   * Commit metadata after direct client-to-storage upload
+   */
+  async commitDirectUpload(params: {
+    fileId: string;
+    fileName: string;
+    fileType: string;
+    fileSize: number;
+    storagePath: string;
+    uploadedBy: string;
+    uploadedByName?: string;
+    uploadedByRole?: string;
+    purpose?: 'leave_attachment' | 'profile_photo' | 'general';
+  }): Promise<UploadedFileMetadata> {
+    const metadata: UploadedFileMetadata = {
+      id: params.fileId,
+      fileName: params.fileName,
+      fileType: params.fileType || 'application/octet-stream',
+      fileSize: params.fileSize,
+      storagePath: params.storagePath,
+      storageBucket: storageBucketName,
+      uploadedBy: params.uploadedBy,
+      uploadedByName: params.uploadedByName || 'Unknown',
+      uploadedByRole: params.uploadedByRole || 'employee',
+      purpose: params.purpose || 'general',
+      url: `/api/v1/storage/file/${params.fileId}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await adminDb.collection(COLLECTION).doc(params.fileId).set(metadata);
     return metadata;
   },
 
@@ -135,8 +270,6 @@ export const storageRepository = {
           else if (ext === '.webp') mimeType = 'image/webp';
           else if (ext === '.gif') mimeType = 'image/gif';
           else if (ext === '.pdf') mimeType = 'application/pdf';
-          else if (['.doc', '.docx'].includes(ext)) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-          else if (['.xls', '.xlsx'].includes(ext)) mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
           return {
             id,
@@ -160,7 +293,28 @@ export const storageRepository = {
   },
 
   async getFileBuffer(metadata: UploadedFileMetadata): Promise<Buffer | null> {
-    // 1. Check local disk/tmp cache
+    // 1. Download from Firebase Cloud Storage Bucket if storagePath exists
+    if (metadata.storagePath) {
+      try {
+        const bucket = getAdminStorageBucket();
+        const bucketFile = bucket.file(metadata.storagePath);
+        const [exists] = await bucketFile.exists();
+        if (exists) {
+          const [downloadedBuffer] = await bucketFile.download();
+          // Cache in /tmp
+          try {
+            if (metadata.diskPath) {
+              await fs.promises.writeFile(metadata.diskPath, downloadedBuffer);
+            }
+          } catch {}
+          return downloadedBuffer;
+        }
+      } catch (gcsDownloadErr: any) {
+        console.warn(`[StorageRepository] Firebase Storage download warning (${gcsDownloadErr?.message}), checking fallbacks...`);
+      }
+    }
+
+    // 2. Check local disk/tmp cache
     try {
       if (metadata.diskPath && fs.existsSync(metadata.diskPath)) {
         return await fs.promises.readFile(metadata.diskPath);
@@ -169,7 +323,7 @@ export const storageRepository = {
       console.warn('[StorageRepository] Disk read warning:', diskErr);
     }
 
-    // 2. Check embedded base64Data in metadata
+    // 3. Check embedded base64Data in metadata
     if (metadata.base64Data) {
       try {
         return Buffer.from(metadata.base64Data, 'base64');
@@ -178,7 +332,7 @@ export const storageRepository = {
       }
     }
 
-    // 3. Check Firestore chunks for large files
+    // 4. Check Firestore chunks for large files
     try {
       const chunksSnap = await adminDb
         .collection(COLLECTION)
@@ -196,12 +350,6 @@ export const storageRepository = {
           }
         });
         const combined = Buffer.concat(buffers);
-        // Write back to disk cache
-        try {
-          if (metadata.diskPath) {
-            await fs.promises.writeFile(metadata.diskPath, combined);
-          }
-        } catch (e) {}
         return combined;
       }
     } catch (chunksErr) {
@@ -214,6 +362,12 @@ export const storageRepository = {
   async deleteById(id: string): Promise<boolean> {
     try {
       const meta = await this.getById(id);
+      if (meta?.storagePath) {
+        try {
+          const bucket = getAdminStorageBucket();
+          await bucket.file(meta.storagePath).delete({ ignoreNotFound: true });
+        } catch (e) {}
+      }
       if (meta && meta.diskPath && fs.existsSync(meta.diskPath)) {
         try {
           await fs.promises.unlink(meta.diskPath);

@@ -57,9 +57,9 @@ export const LiveAttendanceRegister: React.FC<LiveAttendanceRegisterProps> = ({
     loadSites();
   }, []);
 
-  const fetchRegister = async () => {
+  const fetchRegister = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const res = await api.getAdminAttendance({
         date: date || undefined,
         siteId: siteId !== 'ALL' ? siteId : undefined,
@@ -71,12 +71,17 @@ export const LiveAttendanceRegister: React.FC<LiveAttendanceRegisterProps> = ({
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchRegister();
+    // Real-time live polling interval for instant sign-in / sign-out updates
+    const liveInterval = setInterval(() => {
+      fetchRegister(true);
+    }, 6000);
+    return () => clearInterval(liveInterval);
   }, [date, siteId, shiftType, isExtraShift, status, refreshTrigger]);
 
   const handleExportCSV = () => {
@@ -162,9 +167,14 @@ export const LiveAttendanceRegister: React.FC<LiveAttendanceRegisterProps> = ({
         </div>
 
         <div className="flex items-center space-x-3">
+          <div className="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Live Sync Active</span>
+          </div>
+
           <button
-            onClick={fetchRegister}
-            className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+            onClick={() => fetchRegister(false)}
+            className="p-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
             title="Refresh Attendance Muster"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />

@@ -148,9 +148,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               {/* Employee Header Profile Quick View */}
               <button
                 type="button"
-                onClick={onProfileClick}
+                onClick={isEmployee ? (onOpenEmployeeMenu || onProfileClick) : onProfileClick}
                 className="flex items-center space-x-2 p-1 sm:p-1.5 rounded-xl transition text-left hover:bg-slate-800 cursor-pointer"
-                title="View My Profile"
+                title={isEmployee ? 'Open Menu' : 'View Profile'}
               >
                 <EmployeeAvatar
                   name={user.fullName || 'User'}

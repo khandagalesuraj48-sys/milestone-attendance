@@ -341,11 +341,72 @@ export const api = {
       createdAt: string;
     };
   }> {
+    const resolvedName = fileName || (file instanceof File ? file.name : 'attachment.bin');
+    const resolvedType = (file instanceof File ? file.type : '') || 'application/octet-stream';
+    const fileSize = file.size;
+
+    // 1. Attempt direct client-to-storage upload via Firebase Storage Signed URL
+    // (Bypasses serverless payload limit for full 100MB direct upload support)
+    try {
+      const urlRes = await request<{
+        success: boolean;
+        fileId: string;
+        uploadUrl: string;
+        downloadUrl: string;
+        storagePath: string;
+      }>('/api/v1/storage/upload-url', {
+        method: 'POST',
+        body: JSON.stringify({
+          fileName: resolvedName,
+          fileType: resolvedType,
+          fileSize,
+          purpose,
+        }),
+      });
+
+      if (urlRes?.success && urlRes.uploadUrl) {
+        // Direct upload binary PUT to Firebase Cloud Storage bucket signed URL
+        const putRes = await fetch(urlRes.uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': resolvedType,
+          },
+          body: file,
+        });
+
+        if (putRes.ok) {
+          // Commit metadata to database
+          const commitRes = await request<{
+            success: boolean;
+            message: string;
+            file: any;
+          }>('/api/v1/storage/commit-direct-upload', {
+            method: 'POST',
+            body: JSON.stringify({
+              fileId: urlRes.fileId,
+              fileName: resolvedName,
+              fileType: resolvedType,
+              fileSize,
+              storagePath: urlRes.storagePath,
+              purpose,
+            }),
+          });
+
+          if (commitRes?.success) {
+            return commitRes;
+          }
+        }
+      }
+    } catch (directUploadErr) {
+      console.warn('[Direct Storage Upload] Signed URL path unavailable, using multipart upload fallback:', directUploadErr);
+    }
+
+    // 2. Multipart upload fallback to Express API
     const formData = new FormData();
     if (file instanceof File) {
-      formData.append('file', file, fileName || file.name);
+      formData.append('file', file, resolvedName);
     } else {
-      formData.append('file', file, fileName || 'upload.bin');
+      formData.append('file', file, resolvedName);
     }
     formData.append('purpose', purpose);
     return uploadRequest('/api/v1/storage/upload', formData);

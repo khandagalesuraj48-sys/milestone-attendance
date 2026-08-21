@@ -88,17 +88,8 @@ export const LeaveRequestCard: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const validExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv'];
-    const ext = '.' + (file.name.split('.').pop()?.toLowerCase() || '');
-    const isValid =
-      file.type.startsWith('image/') ||
-      validExtensions.includes(ext) ||
-      file.type.includes('pdf') ||
-      file.type.includes('document') ||
-      file.type.includes('sheet');
-
-    if (!isValid) {
-      setLeaveFormError('Unsupported file format. Please select a PDF, Word, Excel, or Image document.');
+    if (file.size > 100 * 1024 * 1024) {
+      setLeaveFormError('Selected file exceeds maximum capacity (100 MB).');
       return;
     }
 
@@ -437,10 +428,10 @@ export const LeaveRequestCard: React.FC = () => {
                     ) : (
                       <label className="flex items-center justify-center space-x-2 py-3 cursor-pointer text-slate-600 hover:text-slate-900 transition">
                         <Upload className="w-4 h-4 text-slate-400" />
-                        <span className="font-semibold">Upload Doctor's Note / Supporting Document (PDF, JPG, PNG, DOCX)</span>
+                        <span className="font-semibold">Upload Supporting Document (All formats accepted up to 100MB)</span>
                         <input
                           type="file"
-                          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                          accept="*/*"
                           onChange={handleFileUpload}
                           className="hidden"
                         />

@@ -11,7 +11,6 @@ import {
   LogOut,
   ChevronRight,
   ShieldCheck,
-  Building,
   Banknote,
 } from 'lucide-react';
 
@@ -132,12 +131,6 @@ export const EmployeeMenuDrawer: React.FC<EmployeeMenuDrawerProps> = ({
                 </p>
                 <div className="flex items-center space-x-2 mt-1 text-[10px] text-slate-500 font-mono">
                   <span className="bg-white px-1.5 py-0.5 rounded border border-slate-200">{user.employeeId}</span>
-                  {siteName && (
-                    <span className="text-slate-600 truncate flex items-center space-x-1">
-                      <Building className="w-2.5 h-2.5 shrink-0 text-slate-400" />
-                      <span className="truncate">{siteName}</span>
-                    </span>
-                  )}
                 </div>
               </div>
             </div>

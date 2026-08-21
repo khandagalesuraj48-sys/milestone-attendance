@@ -76,6 +76,93 @@ export default function App() {
   // Common Data
   const [locations, setLocations] = useState<LocationSite[]>([]);
 
+  // Hash-based client-side routing & history management
+  const getEmpTabFromHash = (hash: string): 'SHIFT' | 'HISTORY' | 'SLIPS' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS' => {
+    const clean = hash.replace(/^#\/?/, '').toLowerCase();
+    if (clean === 'register' || clean === 'history') return 'HISTORY';
+    if (clean === 'slips' || clean === 'salary') return 'SLIPS';
+    if (clean === 'leave' || clean === 'leaves') return 'LEAVE';
+    if (clean === 'profile') return 'PROFILE';
+    if (clean === 'team' || clean === 'highlights') return 'TEAM_HIGHLIGHTS';
+    return 'SHIFT';
+  };
+
+  const getEmpHashFromTab = (tab: string): string => {
+    switch (tab) {
+      case 'HISTORY': return '#/register';
+      case 'SLIPS': return '#/slips';
+      case 'LEAVE': return '#/leave';
+      case 'PROFILE': return '#/profile';
+      case 'TEAM_HIGHLIGHTS': return '#/team';
+      case 'SHIFT':
+      default: return '#/shift';
+    }
+  };
+
+  const getAdminTabFromHash = (hash: string): any => {
+    const clean = hash.replace(/^#\/?(admin\/)?/, '').toLowerCase();
+    const map: Record<string, string> = {
+      dashboard: 'DASHBOARD',
+      register: 'REGISTER',
+      payroll: 'PAYROLL',
+      employees: 'EMPLOYEES',
+      sites: 'SITES',
+      access: 'ACCESS',
+      leaves: 'LEAVES',
+      holidays: 'HOLIDAYS',
+      security: 'SECURITY',
+      policy: 'POLICY',
+      audit: 'AUDIT',
+      reports: 'REPORTS',
+    };
+    return map[clean] || 'DASHBOARD';
+  };
+
+  const getAdminHashFromTab = (tab: string): string => {
+    return `#/admin/${tab.toLowerCase()}`;
+  };
+
+  const handleSelectEmpTab = (tab: 'SHIFT' | 'HISTORY' | 'SLIPS' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS', pushHistory = true) => {
+    setEmpActiveTab(tab);
+    const targetHash = getEmpHashFromTab(tab);
+    if (pushHistory && window.location.hash !== targetHash) {
+      window.history.pushState({ empTab: tab }, '', targetHash);
+    }
+  };
+
+  const handleSelectAdminTab = (tab: any, pushHistory = true) => {
+    setAdminActiveTab(tab);
+    const targetHash = getAdminHashFromTab(tab);
+    if (pushHistory && window.location.hash !== targetHash) {
+      window.history.pushState({ adminTab: tab }, '', targetHash);
+    }
+  };
+
+  // Listen to popstate and hashchange for clean in-app back/forward navigation without page reload
+  useEffect(() => {
+    const handlePopState = () => {
+      const hash = window.location.hash;
+      if (currentUser?.role === 'admin') {
+        const tab = getAdminTabFromHash(hash);
+        setAdminActiveTab(tab);
+      } else {
+        const tab = getEmpTabFromHash(hash);
+        setEmpActiveTab(tab);
+      }
+    };
+
+    if (window.location.hash) {
+      handlePopState();
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+    };
+  }, [currentUser?.role]);
+
   // Check auth session on startup
   const checkAuth = async () => {
     try {
@@ -246,8 +333,8 @@ export default function App() {
       <Navbar
         user={currentUser}
         onLogout={handleLogout}
-        onProfileClick={() => currentUser.role === 'employee' && setEmpActiveTab('PROFILE')}
-        onSelectTab={(tab) => setEmpActiveTab(tab)}
+        onProfileClick={() => currentUser.role === 'employee' && handleSelectEmpTab('PROFILE')}
+        onSelectTab={(tab) => handleSelectEmpTab(tab)}
         currentTab={empActiveTab}
         onMobileMenuToggle={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMobileMenuOpen={isMobileMenuOpen}
@@ -264,7 +351,7 @@ export default function App() {
             onClose={() => setIsEmployeeMenuOpen(false)}
             user={currentUser}
             currentTab={empActiveTab}
-            onSelectTab={(tab) => setEmpActiveTab(tab)}
+            onSelectTab={(tab) => handleSelectEmpTab(tab)}
             onLogout={handleLogout}
             siteName="RCL • WALSHIND"
           />
@@ -273,6 +360,10 @@ export default function App() {
             onClose={() => setIsNotificationsOpen(false)}
             notice={autoSignOutNotice}
             user={currentUser}
+            onCountUpdate={(count) => {
+              setUnreadNotificationsCount(count);
+              if (count === 0) setAutoSignOutNotice(null);
+            }}
           />
         </>
       )}
@@ -326,7 +417,7 @@ export default function App() {
                             key={item.id}
                             id={`tab-admin-${item.id.toLowerCase()}`}
                             onClick={() => {
-                              setAdminActiveTab(item.id as any);
+                              handleSelectAdminTab(item.id as any);
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition group ${
@@ -451,7 +542,7 @@ export default function App() {
               <div className="flex items-center space-x-1 p-1 bg-white border border-slate-200 rounded-2xl shadow-2xs text-xs font-semibold">
                 <button
                   id="tab-emp-shift"
-                  onClick={() => setEmpActiveTab('SHIFT')}
+                  onClick={() => handleSelectEmpTab('SHIFT')}
                   className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'SHIFT'
                       ? 'bg-slate-900 text-white shadow-xs'
@@ -464,7 +555,7 @@ export default function App() {
 
                 <button
                   id="tab-emp-register"
-                  onClick={() => setEmpActiveTab('HISTORY')}
+                  onClick={() => handleSelectEmpTab('HISTORY')}
                   className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'HISTORY'
                       ? 'bg-slate-900 text-white shadow-xs'
@@ -477,7 +568,7 @@ export default function App() {
 
                 <button
                   id="tab-emp-slips"
-                  onClick={() => setEmpActiveTab('SLIPS')}
+                  onClick={() => handleSelectEmpTab('SLIPS')}
                   className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'SLIPS'
                       ? 'bg-slate-900 text-white shadow-xs'
@@ -490,7 +581,7 @@ export default function App() {
 
                 <button
                   id="tab-emp-leave"
-                  onClick={() => setEmpActiveTab('LEAVE')}
+                  onClick={() => handleSelectEmpTab('LEAVE')}
                   className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'LEAVE'
                       ? 'bg-slate-900 text-white shadow-xs'
@@ -503,7 +594,7 @@ export default function App() {
 
                 <button
                   id="tab-emp-profile"
-                  onClick={() => setEmpActiveTab('PROFILE')}
+                  onClick={() => handleSelectEmpTab('PROFILE')}
                   className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
                     empActiveTab === 'PROFILE'
                       ? 'bg-slate-900 text-white shadow-xs'
@@ -538,7 +629,7 @@ export default function App() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setEmpActiveTab('SHIFT')}
+                  onClick={() => handleSelectEmpTab('SHIFT')}
                   className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 hover:bg-amber-100 flex items-center space-x-1 cursor-pointer transition"
                 >
                   <span>&larr; Return to Shift</span>

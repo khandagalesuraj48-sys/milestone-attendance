@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, cert, applicationDefault } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
+import { getStorage } from 'firebase-admin/storage';
 
 const defaultProjectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'milestone-attendance';
 const targetDatabaseId = process.env.FIREBASE_DATABASE_ID || 'default';
@@ -125,6 +126,21 @@ try {
 console.log(`[Firebase Admin] Firestore client configured for project: ${diagnostics.detectedProjectId}, database: ${targetDatabaseId}`);
 
 export const adminAuth = getAuth(appInstance);
+
+export const adminStorage = getStorage(appInstance);
+export const storageBucketName =
+  process.env.FIREBASE_STORAGE_BUCKET ||
+  process.env.GCS_BUCKET ||
+  `${diagnostics.detectedProjectId}.firebasestorage.app`;
+
+export function getAdminStorageBucket() {
+  try {
+    return adminStorage.bucket(storageBucketName);
+  } catch (err) {
+    console.warn('[Firebase Admin Storage] Default bucket resolution fallback:', err);
+    return adminStorage.bucket();
+  }
+}
 
 export function getFirebaseAdminDiagnostics(): AdminDiagnostics {
   return { ...diagnostics };

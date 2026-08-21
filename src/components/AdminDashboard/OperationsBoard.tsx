@@ -84,9 +84,9 @@ export const OperationsBoard: React.FC<OperationsBoardProps> = ({ summary, today
   const [schedulerOutput, setSchedulerOutput] = useState<string | null>(null);
 
   // Fetch full overview data based on active filters
-  const fetchBoardOverview = async () => {
+  const fetchBoardOverview = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const res = await api.getAdminOverview({
         date: filterDate,
         siteId: filterSiteId !== 'ALL' ? filterSiteId : undefined,
@@ -106,12 +106,17 @@ export const OperationsBoard: React.FC<OperationsBoardProps> = ({ summary, today
     } catch (err) {
       console.error('Failed to load operations board data', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchBoardOverview();
+    fetchBoardOverview(false);
+    // Real-time live background updates for live active attendance
+    const interval = setInterval(() => {
+      fetchBoardOverview(true);
+    }, 8000);
+    return () => clearInterval(interval);
   }, [filterDate, filterSiteId, filterLocationId, filterDepartment]);
 
   // Handle Cloud Scheduler Simulation

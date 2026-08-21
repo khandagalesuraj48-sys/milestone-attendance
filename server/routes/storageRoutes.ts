@@ -11,48 +11,119 @@ import { leavesRepository } from '../repositories/leavesRepository';
 
 export const storageRouter = express.Router();
 
-// Supported MIME types and extensions for general attachments
-const ALLOWED_MIME_TYPES = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/gif',
-  'image/heic',
-  'image/bmp',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/plain',
-  'text/csv',
-]);
+const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100 MB
 
-const ALLOWED_EXTENSIONS = new Set([
-  '.pdf',
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.gif',
-  '.heic',
-  '.bmp',
-  '.doc',
-  '.docx',
-  '.xls',
-  '.xlsx',
-  '.txt',
-  '.csv',
-]);
-
-function isAllowedFile(fileName: string, mimeType: string): boolean {
+function isImageFile(fileName: string, mimeType: string): boolean {
   const ext = path.extname(fileName).toLowerCase();
   const mime = (mimeType || '').toLowerCase();
-  return ALLOWED_EXTENSIONS.has(ext) || ALLOWED_MIME_TYPES.has(mime) || mime.startsWith('image/');
+  const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.bmp', '.svg'];
+  return mime.startsWith('image/') || imageExts.includes(ext);
 }
 
-// POST /api/v1/storage/upload - Upload file supporting attachments, documents, etc.
+// POST /api/v1/storage/upload-url - Generate signed upload URL from Firebase Storage for direct client-to-storage upload
+storageRouter.post('/upload-url', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  try {
+    const { fileName = 'attachment', fileType = 'application/octet-stream', fileSize = 0, purpose = 'leave_attachment' } = req.body || {};
+
+    if (fileSize > MAX_FILE_SIZE_BYTES) {
+      return res.status(400).json({
+        success: false,
+        error: 'FILE_TOO_LARGE',
+        message: 'Selected file exceeds maximum capacity (100 MB).',
+      });
+    }
+
+    if (purpose === 'profile_photo' && !isImageFile(fileName, fileType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'IMAGE_REQUIRED',
+        message: 'Profile photos must be a valid image format (JPG, PNG, WEBP).',
+      });
+    }
+
+    const signedData = await storageRepository.createSignedUploadUrl({
+      fileName,
+      fileType,
+      fileSize,
+      uploadedBy: user.employeeId || user.uid,
+      purpose,
+    });
+
+    if (!signedData) {
+      return res.status(500).json({
+        success: false,
+        error: 'SIGNED_URL_FAILED',
+        message: 'Could not generate direct upload URL.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      fileId: signedData.fileId,
+      uploadUrl: signedData.uploadUrl,
+      downloadUrl: signedData.downloadUrl,
+      storagePath: signedData.storagePath,
+    });
+  } catch (err: any) {
+    console.error('[Storage Upload URL Error]', err);
+    return res.status(500).json({
+      success: false,
+      error: 'STORAGE_SIGNED_URL_ERROR',
+      message: err.message || 'Unable to generate upload URL.',
+    });
+  }
+});
+
+// POST /api/v1/storage/commit-direct-upload - Commit metadata after direct client-to-storage upload completes
+storageRouter.post('/commit-direct-upload', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  try {
+    const { fileId, fileName, fileType, fileSize, storagePath, purpose = 'leave_attachment' } = req.body || {};
+    if (!fileId || !fileName || !storagePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_PARAMS',
+        message: 'File ID, name, and storage path are required.',
+      });
+    }
+
+    const saved = await storageRepository.commitDirectUpload({
+      fileId,
+      fileName,
+      fileType: fileType || 'application/octet-stream',
+      fileSize: fileSize || 0,
+      storagePath,
+      uploadedBy: user.employeeId || user.uid,
+      uploadedByName: user.fullName,
+      uploadedByRole: user.role,
+      purpose,
+    });
+
+    return res.json({
+      success: true,
+      message: 'File metadata successfully saved.',
+      file: {
+        id: saved.id,
+        fileName: saved.fileName,
+        fileType: saved.fileType,
+        fileSize: saved.fileSize,
+        url: saved.url,
+        purpose: saved.purpose,
+        createdAt: saved.createdAt,
+      },
+    });
+  } catch (err: any) {
+    console.error('[Commit Direct Upload Error]', err);
+    return res.status(500).json({
+      success: false,
+      error: 'COMMIT_ERROR',
+      message: err.message || 'Unable to save file record.',
+    });
+  }
+});
+
+// POST /api/v1/storage/upload - Upload file supporting all attachments, documents, etc. up to 100MB
 storageRouter.post('/upload', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
 
@@ -109,19 +180,20 @@ storageRouter.post('/upload', requireAuth, async (req: AuthenticatedRequest, res
       });
     }
 
-    if (fileBuffer.length > 50 * 1024 * 1024) {
+    if (fileBuffer.length > MAX_FILE_SIZE_BYTES) {
       return res.status(400).json({
         success: false,
         error: 'FILE_TOO_LARGE',
-        message: 'Selected file exceeds maximum capacity (50 MB).',
+        message: 'Selected file exceeds maximum capacity (100 MB).',
       });
     }
 
-    if (!isAllowedFile(fileName, fileType)) {
+    // Only profile_photo requires image format validation. All other files are accepted unconditionally.
+    if (purpose === 'profile_photo' && !isImageFile(fileName, fileType)) {
       return res.status(400).json({
         success: false,
-        error: 'UNSUPPORTED_FORMAT',
-        message: 'Unsupported file format. Please upload a valid document or image.',
+        error: 'IMAGE_REQUIRED',
+        message: 'Profile photos must be a valid image format (JPG, PNG, WEBP).',
       });
     }
 
@@ -159,7 +231,7 @@ storageRouter.post('/upload', requireAuth, async (req: AuthenticatedRequest, res
   }
 });
 
-// POST /api/v1/storage/profile-photo - Upload and update profile photo
+// POST /api/v1/storage/profile-photo - Upload and update profile photo persistently
 storageRouter.post('/profile-photo', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
 
@@ -181,7 +253,7 @@ storageRouter.post('/profile-photo', requireAuth, async (req: AuthenticatedReque
           uploadedByRole: user.role,
           purpose: 'profile_photo',
         });
-        photoUrl = saved.url;
+        photoUrl = saved.storageUrl || saved.url;
       }
     } else if (req.body && typeof req.body === 'object' && req.body.photoUrl) {
       const rawPhoto = req.body.photoUrl;
@@ -201,7 +273,7 @@ storageRouter.post('/profile-photo', requireAuth, async (req: AuthenticatedReque
             uploadedByRole: user.role,
             purpose: 'profile_photo',
           });
-          photoUrl = saved.url;
+          photoUrl = saved.storageUrl || saved.url;
         } else {
           photoUrl = rawPhoto;
         }
@@ -250,7 +322,7 @@ storageRouter.post('/profile-photo', requireAuth, async (req: AuthenticatedReque
   }
 });
 
-// GET /api/v1/storage/file/:fileId - Secure download/streaming of stored files
+// GET /api/v1/storage/file/:fileId - Secure download/streaming of stored files across serverless cold starts
 storageRouter.get('/file/:fileId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const { fileId } = req.params;
   const user = req.user!;
@@ -292,7 +364,7 @@ storageRouter.get('/file/:fileId', requireAuth, async (req: AuthenticatedRequest
       });
     }
 
-    // Attempt streaming from physical disk
+    // 1. Attempt streaming from local disk if present
     if (fileMeta.diskPath && fs.existsSync(fileMeta.diskPath)) {
       res.setHeader('Content-Type', fileMeta.fileType || 'application/octet-stream');
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileMeta.fileName)}"`);
@@ -300,7 +372,7 @@ storageRouter.get('/file/:fileId', requireAuth, async (req: AuthenticatedRequest
       return res.sendFile(path.resolve(fileMeta.diskPath));
     }
 
-    // Fallback: Buffer read from Firestore data / chunks
+    // 2. Stream directly from Firebase Cloud Storage or Firestore buffer
     const buffer = await storageRepository.getFileBuffer(fileMeta);
     if (buffer) {
       res.setHeader('Content-Type', fileMeta.fileType || 'application/octet-stream');

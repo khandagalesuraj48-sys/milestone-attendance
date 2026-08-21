@@ -12,9 +12,9 @@ import { employeesRepository } from './repositories/employeesRepository';
 export function createExpressApp() {
   const app = express();
 
-  // Middleware for JSON & urlencoded payloads (support up to 20MB for metadata/payloads)
-  app.use(express.json({ limit: '20mb' }));
-  app.use(express.urlencoded({ limit: '20mb', extended: true }));
+  // Middleware for JSON & urlencoded payloads (support up to 105MB for large file uploads & metadata)
+  app.use(express.json({ limit: '105mb' }));
+  app.use(express.urlencoded({ limit: '105mb', extended: true }));
 
   // URL normalization: support direct calls and Netlify functions rewrites (e.g. /v1/* -> /api/v1/*)
   app.use((req, _res, next) => {

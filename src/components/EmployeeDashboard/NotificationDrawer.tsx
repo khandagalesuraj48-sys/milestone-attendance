@@ -21,6 +21,7 @@ interface NotificationDrawerProps {
   activeShift?: string | null;
   siteName?: string;
   user?: User | null;
+  onCountUpdate?: (count: number) => void;
 }
 
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
@@ -29,6 +30,8 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   notice,
   activeShift,
   siteName,
+  user,
+  onCountUpdate,
 }) => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,7 +41,10 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
     try {
       setLoading(true);
       const res = await api.getNotifications();
-      setNotifications(res.notifications || []);
+      const list = res.notifications || [];
+      setNotifications(list);
+      const unread = list.filter((n: any) => !n.isRead).length;
+      onCountUpdate?.(unread);
     } catch (err) {
       console.error('Failed to load notifications', err);
     } finally {
@@ -55,9 +61,12 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   const handleMarkAsRead = async (id: string) => {
     try {
       await api.markNotificationRead(id);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-      );
+      setNotifications((prev) => {
+        const next = prev.map((n) => (n.id === id ? { ...n, isRead: true } : n));
+        const unread = next.filter((n) => !n.isRead).length;
+        onCountUpdate?.(unread);
+        return next;
+      });
     } catch (err) {
       console.error(err);
     }
@@ -67,6 +76,7 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
     try {
       await api.markAllNotificationsRead();
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      onCountUpdate?.(0);
     } catch (err) {
       console.error(err);
     }
