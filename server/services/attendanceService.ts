@@ -28,6 +28,7 @@ export interface PunchOutParams {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  installationKey?: string;
   ipAddress?: string;
   userAgent?: string;
 }
@@ -234,11 +235,30 @@ export const attendanceService = {
    * Complete verified server-authoritative Punch Out
    */
   async punchOut(params: PunchOutParams): Promise<{ record: AttendanceRecord; message: string }> {
-    const { user, latitude, longitude, accuracy, ipAddress } = params;
+    const { user, latitude, longitude, accuracy, installationKey, ipAddress, userAgent } = params;
 
     const activeSession = await attendanceRepository.getActiveSession(user.employeeId);
     if (!activeSession) {
       throw new Error('No active open session found to sign out from.');
+    }
+
+    // Step: Block sign-out if session was marked post-cutoff
+    if ((activeSession as any).isPostCutoffSession) {
+      throw new Error('Sign-out is not available for sessions created after cutoff.');
+    }
+
+    // Verify Device Binding on Punch Out if provided
+    if (installationKey) {
+      const devCheck = await deviceService.validateOrBindDevice(
+        user.employeeId,
+        user.fullName,
+        installationKey,
+        ipAddress || '127.0.0.1',
+        userAgent || 'Web Browser'
+      );
+      if (!devCheck.isValid) {
+        throw new Error(devCheck.error || 'Device verification failed on sign out.');
+      }
     }
 
     // Geofence Validation on Sign Out (must be within any active location of the assigned site)

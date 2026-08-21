@@ -2126,6 +2126,19 @@ adminRouter.post('/payroll/:id/finalize', async (req: AuthenticatedRequest, res:
     const run = await payrollRepository.getRunById(id);
     if (!run) return res.status(404).json({ success: false, error: 'PAYROLL_RUN_NOT_FOUND' });
 
+    // Validate mandatory statutory and banking data completeness
+    const invalidItems = (run.items || []).filter(
+      (it) => !it.bankName || !it.accountNumber || !it.ifscCode || !it.panNumber
+    );
+    if (invalidItems.length > 0) {
+      const invalidSummary = invalidItems.map((it) => `${it.employeeId} (${it.employeeName})`).join(', ');
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_STATUTORY_DATA',
+        message: `Cannot finalize payroll: Mandatory statutory and banking details (Bank Name, Account Number, IFSC, PAN) are missing for: ${invalidSummary}. Please update employee profiles in Master Settings before finalizing.`,
+      });
+    }
+
     const nowIso = new Date().toISOString();
     await payrollRepository.updateRun(id, {
       status: 'FINALIZED',
@@ -2155,6 +2168,19 @@ adminRouter.post('/payroll/:id/publish', async (req: AuthenticatedRequest, res: 
   try {
     const run = await payrollRepository.getRunById(id);
     if (!run) return res.status(404).json({ success: false, error: 'PAYROLL_RUN_NOT_FOUND' });
+
+    // Validate mandatory statutory and banking data completeness
+    const invalidItems = (run.items || []).filter(
+      (it) => !it.bankName || !it.accountNumber || !it.ifscCode || !it.panNumber
+    );
+    if (invalidItems.length > 0) {
+      const invalidSummary = invalidItems.map((it) => `${it.employeeId} (${it.employeeName})`).join(', ');
+      return res.status(400).json({
+        success: false,
+        error: 'MISSING_STATUTORY_DATA',
+        message: `Cannot publish payroll: Mandatory statutory and banking details (Bank Name, Account Number, IFSC, PAN) are missing for: ${invalidSummary}. Please update employee profiles in Master Settings before publishing.`,
+      });
+    }
 
     const nowIso = new Date().toISOString();
     await payrollRepository.updateRun(id, {

@@ -102,7 +102,7 @@ attendanceRouter.post('/punch-in', async (req: AuthenticatedRequest, res: Respon
 // POST /api/v1/attendance/punch-out
 attendanceRouter.post('/punch-out', async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
-  const { latitude, longitude, accuracy } = req.body;
+  const { latitude, longitude, accuracy, installationKey } = req.body;
 
   try {
     const result = await attendanceService.punchOut({
@@ -110,6 +110,7 @@ attendanceRouter.post('/punch-out', async (req: AuthenticatedRequest, res: Respo
       latitude: typeof latitude === 'number' ? latitude : 18.6570,
       longitude: typeof longitude === 'number' ? longitude : 72.8790,
       accuracy: typeof accuracy === 'number' ? accuracy : 10,
+      installationKey,
       ipAddress: req.ip || '127.0.0.1',
       userAgent: req.headers['user-agent'] || 'Web Browser',
     });

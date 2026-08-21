@@ -7,6 +7,7 @@ import {
 } from '../lib/storageEngine';
 import { LeaveBalance, LeaveLedgerEntry } from '../../src/types';
 import { shiftService } from '../services/shiftService';
+import { employeesRepository } from './employeesRepository';
 
 const BALANCES_COLLECTION = 'leave_balances';
 const LEDGER_COLLECTION = 'leave_ledger';
@@ -77,19 +78,26 @@ export const leaveLedgerRepository = {
   },
 
   /**
-   * Idempotent +2 days per month entitlement credit
+   * Idempotent +2 days per month entitlement credit starting strictly from employee joining date
    */
   async ensureMonthlyEntitlement(balance: LeaveBalance): Promise<LeaveBalance> {
     const istParts = shiftService.getISTDateParts();
     const currentYearMonth = istParts.yearMonth; // e.g. "2026-08"
 
-    // Generate list of months from start of year or Jan 2026 to current month
     const [yearStr, monthStr] = currentYearMonth.split('-');
     const currentYear = parseInt(yearStr, 10);
     const currentMonthNum = parseInt(monthStr, 10);
 
+    // Fetch employee joining date to establish accurate entitlement eligibility window
+    const emp = await employeesRepository.getById(balance.employeeId);
+    const joiningDate = emp?.joiningDate || `${currentYear}-01-01`;
+    const [joinYStr, joinMStr] = joiningDate.split('-');
+    const joinYear = parseInt(joinYStr, 10) || currentYear;
+    const joinMonth = parseInt(joinMStr, 10) || 1;
+
     const neededMonths: string[] = [];
-    for (let m = 1; m <= currentMonthNum; m++) {
+    const startM = joinYear === currentYear ? joinMonth : (joinYear > currentYear ? 999 : 1);
+    for (let m = startM; m <= currentMonthNum; m++) {
       neededMonths.push(`${currentYear}-${String(m).padStart(2, '0')}`);
     }
 

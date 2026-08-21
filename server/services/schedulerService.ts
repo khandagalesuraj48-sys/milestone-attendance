@@ -35,9 +35,10 @@ export const schedulerService = {
       // Calculate working minutes up to cutoff
       const workingMinutes = Math.min(Math.max(0, Math.round((cutoffTimeMs - startMs) / 60000)), 480);
 
+      const cutoffIso = new Date(cutoffTimeMs).toISOString();
       const targetId = session.recordId || session.id || '';
       await attendanceRepository.update(targetId, {
-        signOutTime: nowIso,
+        signOutTime: cutoffIso,
         sessionStatus: 'CLOSED',
         attendanceState: 'AUTO_SIGNED_OUT',
         attendanceStatus: 'PRESENT_HALF_DAY', // Milestone Policy: Auto sign-out capped at HALF_DAY
@@ -98,9 +99,10 @@ export const schedulerService = {
       const startMs = new Date(session.signInTime || nowIso).getTime();
       const workingMinutes = Math.min(Math.max(0, Math.round((cutoffTimeMs - startMs) / 60000)), 480);
 
+      const cutoffIso = new Date(cutoffTimeMs).toISOString();
       const targetId = session.recordId || session.id || '';
       await attendanceRepository.update(targetId, {
-        signOutTime: nowIso,
+        signOutTime: cutoffIso,
         sessionStatus: 'CLOSED',
         attendanceState: 'AUTO_SIGNED_OUT',
         attendanceStatus: 'PRESENT_HALF_DAY',

@@ -26,6 +26,18 @@ export const deviceService = {
 
     // Case 1: First-time binding (No active device bound)
     if (!boundSignature) {
+      // Check if this installation token is already bound to another active employee
+      const allEmployees = await employeesRepository.getAll();
+      const conflictEmp = allEmployees.find(
+        (e) => e.employeeId !== employee.employeeId && e.boundHardwareSignature === installationKey && e.accountStatus === 'ACTIVE'
+      );
+      if (conflictEmp) {
+        return {
+          isValid: false,
+          error: `This device/browser is already registered to another employee (${conflictEmp.fullName}). Device sharing is prohibited. Please contact Admin if you need a device reassignment.`,
+        };
+      }
+
       const deviceDoc: DeviceBinding = {
         id: `dev_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         deviceId: `dev_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,

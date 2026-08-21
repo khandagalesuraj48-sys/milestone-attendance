@@ -13,11 +13,44 @@ export const storageRouter = express.Router();
 
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100 MB
 
+const DANGEROUS_EXTENSIONS = new Set([
+  '.html', '.htm', '.xhtml', '.svg', '.js', '.mjs', '.jsx', '.ts', '.tsx',
+  '.exe', '.bat', '.sh', '.cmd', '.vbs', '.ps1', '.scr', '.jar',
+  '.jsp', '.asp', '.aspx', '.php', '.cgi', '.py', '.pl', '.dll', '.com', '.msi'
+]);
+
+const ALLOWED_EXTENSIONS = new Set([
+  '.jpg', '.jpeg', '.png', '.webp', '.heic', '.bmp',
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.zip'
+]);
+
+function validateFileSafety(fileName: string, mimeType: string, purpose: string): { valid: boolean; error?: string } {
+  const ext = path.extname(fileName).toLowerCase();
+  const mime = (mimeType || '').toLowerCase();
+
+  if (DANGEROUS_EXTENSIONS.has(ext) || mime.includes('html') || mime.includes('javascript') || mime.includes('svg+xml')) {
+    return { valid: false, error: 'Dangerous or executable file types (.html, .svg, scripts, executables) are strictly prohibited.' };
+  }
+
+  if (purpose === 'profile_photo') {
+    const photoExts = ['.jpg', '.jpeg', '.png', '.webp'];
+    if (!photoExts.includes(ext) || (!mime.startsWith('image/') && mime !== 'application/octet-stream')) {
+      return { valid: false, error: 'Profile photos must be a standard raster image format (JPG, JPEG, PNG, WEBP).' };
+    }
+  } else {
+    if (ext && !ALLOWED_EXTENSIONS.has(ext)) {
+      return { valid: false, error: `Unsupported file extension (${ext}). Allowed formats: JPG, PNG, WEBP, PDF, DOC, DOCX, XLS, XLSX, CSV, TXT, ZIP.` };
+    }
+  }
+
+  return { valid: true };
+}
+
 function isImageFile(fileName: string, mimeType: string): boolean {
   const ext = path.extname(fileName).toLowerCase();
   const mime = (mimeType || '').toLowerCase();
-  const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.bmp', '.svg'];
-  return mime.startsWith('image/') || imageExts.includes(ext);
+  const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.bmp'];
+  return (mime.startsWith('image/') && !mime.includes('svg')) || imageExts.includes(ext);
 }
 
 // POST /api/v1/storage/upload-url - Generate signed upload URL from Firebase Storage for direct client-to-storage upload
@@ -34,11 +67,12 @@ storageRouter.post('/upload-url', requireAuth, async (req: AuthenticatedRequest,
       });
     }
 
-    if (purpose === 'profile_photo' && !isImageFile(fileName, fileType)) {
+    const safety = validateFileSafety(fileName, fileType, purpose);
+    if (!safety.valid) {
       return res.status(400).json({
         success: false,
-        error: 'IMAGE_REQUIRED',
-        message: 'Profile photos must be a valid image format (JPG, PNG, WEBP).',
+        error: 'DISALLOWED_FILE_TYPE',
+        message: safety.error,
       });
     }
 
@@ -188,12 +222,12 @@ storageRouter.post('/upload', requireAuth, async (req: AuthenticatedRequest, res
       });
     }
 
-    // Only profile_photo requires image format validation. All other files are accepted unconditionally.
-    if (purpose === 'profile_photo' && !isImageFile(fileName, fileType)) {
+    const safety = validateFileSafety(fileName, fileType, purpose);
+    if (!safety.valid) {
       return res.status(400).json({
         success: false,
-        error: 'IMAGE_REQUIRED',
-        message: 'Profile photos must be a valid image format (JPG, PNG, WEBP).',
+        error: 'DISALLOWED_FILE_TYPE',
+        message: safety.error,
       });
     }
 
@@ -364,10 +398,17 @@ storageRouter.get('/file/:fileId', requireAuth, async (req: AuthenticatedRequest
       });
     }
 
+    // Security Headers against stored XSS and MIME sniffing
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+
+    const isSafeRasterImage = fileMeta.purpose === 'profile_photo' && isImageFile(fileMeta.fileName, fileMeta.fileType);
+    const dispositionType = isSafeRasterImage ? 'inline' : 'attachment';
+
     // 1. Attempt streaming from local disk if present
     if (fileMeta.diskPath && fs.existsSync(fileMeta.diskPath)) {
       res.setHeader('Content-Type', fileMeta.fileType || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileMeta.fileName)}"`);
+      res.setHeader('Content-Disposition', `${dispositionType}; filename="${encodeURIComponent(fileMeta.fileName)}"`);
       res.setHeader('Cache-Control', 'private, max-age=86400');
       return res.sendFile(path.resolve(fileMeta.diskPath));
     }
@@ -377,7 +418,7 @@ storageRouter.get('/file/:fileId', requireAuth, async (req: AuthenticatedRequest
     if (buffer) {
       res.setHeader('Content-Type', fileMeta.fileType || 'application/octet-stream');
       res.setHeader('Content-Length', buffer.length);
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileMeta.fileName)}"`);
+      res.setHeader('Content-Disposition', `${dispositionType}; filename="${encodeURIComponent(fileMeta.fileName)}"`);
       res.setHeader('Cache-Control', 'private, max-age=86400');
       return res.send(buffer);
     }
