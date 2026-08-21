@@ -2,11 +2,21 @@
 
 @layer base {
   :root {
-    --brand-primary: #0f172a;
-    --brand-accent: #2563eb;
-    --canvas-bg: #f8fafc;
+    /* Rigid Enterprise Brand Palette */
+    --brand-primary: #0f172a;       /* Slate 900 */
+    --brand-base: #f1f5f9;          /* Slate 100 */
+    --brand-canvas: #f8fafc;        /* Slate 50 */
+    --brand-accent: #2563eb;        /* Blue 600 */
+    --brand-accent-hover: #1d4ed8;  /* Blue 700 */
     --card-bg: #ffffff;
-    --border-subtle: rgba(226, 232, 240, 0.85);
+    --border-subtle: #e2e8f0;       /* Slate 200 */
+    
+    /* Strict Typography Scale Hierarchy */
+    --font-heading-lg: 24px;        /* 24px Primary Screen Headers */
+    --font-heading-sm: 18px;        /* 18px Card & Section Headers */
+    --font-body-base: 16px;         /* 16px Primary Body Content */
+    --font-body-sm: 14px;           /* 14px Secondary/Dense Body Content */
+    --font-caption: 12px;           /* 12px Metadata & Pills */
   }
 
   body {
@@ -15,11 +25,118 @@
     -moz-osx-font-smoothing: grayscale;
     background-color: #f8fafc;
     color: #0f172a;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  h1, .text-h1 {
+    font-size: 24px;
+    line-height: 1.25;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: #0f172a;
+  }
+
+  h2, h3, .text-h2 {
+    font-size: 18px;
+    line-height: 1.35;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #0f172a;
+  }
+
+  p, span, div {
+    font-size: 14px;
+  }
+
+  .text-body-lg {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .text-body-sm {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .text-caption {
+    font-size: 12px;
+    line-height: 1.4;
   }
 
   code, kbd, samp, pre {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+}
+
+/* Standardized Enterprise 2xl Card System */
+.enterprise-card, .card-standard {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 1rem; /* rounded-2xl standardized */
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.enterprise-card:hover, .card-standard:hover {
+  border-color: rgba(203, 213, 225, 1);
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.03);
+}
+
+/* Primary Enterprise Button System */
+.btn-primary {
+  background-color: #0f172a; /* Slate 900 */
+  color: #ffffff;
+  border-radius: 1rem; /* rounded-2xl */
+  font-weight: 700;
+  font-size: 14px;
+  padding: 0.625rem 1.25rem;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-primary:hover {
+  background-color: #1e293b; /* Slate 800 */
+}
+
+.btn-accent {
+  background-color: #2563eb; /* Blue 600 */
+  color: #ffffff;
+  border-radius: 1rem;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 0.625rem 1.25rem;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-accent:hover {
+  background-color: #1d4ed8; /* Blue 700 */
+}
+
+.btn-secondary {
+  background-color: #f1f5f9; /* Slate 100 */
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 0.625rem 1.25rem;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-secondary:hover {
+  background-color: #e2e8f0;
 }
 
 /* Custom smooth scrollbars */
@@ -36,20 +153,6 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
-}
-
-/* Smooth micro-interactions & enterprise card polish */
-.enterprise-card {
-  background-color: #ffffff;
-  border: 1px solid rgba(226, 232, 240, 0.85);
-  border-radius: 1rem;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.enterprise-card:hover {
-  border-color: rgba(203, 213, 225, 1);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03);
 }
 
 .table-row-hover {

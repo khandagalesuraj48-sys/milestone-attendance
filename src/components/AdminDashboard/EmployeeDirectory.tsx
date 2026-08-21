@@ -593,10 +593,21 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
 
                       <td className="py-3.5 px-3">
                         {emp.boundHardwareSignature || emp.isDeviceBound ? (
-                          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <ShieldCheck className="w-3 h-3" />
-                            <span>1:1 Bound</span>
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeviceResetError('');
+                              setDeviceResetReason('');
+                              setResetDeviceModalEmp(emp);
+                            }}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300 transition cursor-pointer group"
+                            title="Click to unbind and reset hardware lock"
+                          >
+                            <ShieldCheck className="w-3 h-3 text-emerald-600 group-hover:hidden" />
+                            <Smartphone className="w-3 h-3 text-amber-600 hidden group-hover:inline" />
+                            <span className="group-hover:hidden">1:1 Bound</span>
+                            <span className="hidden group-hover:inline font-bold">Unbind</span>
+                          </button>
                         ) : (
                           <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
                             <span>Unbound</span>
@@ -619,6 +630,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
                       <td className="py-3.5 px-3 text-right">
                         <div className="flex items-center justify-end space-x-1.5">
                           <button
+                            type="button"
                             onClick={() => setViewEmployeeModalEmp(emp)}
                             className="p-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition cursor-pointer"
                             title="View Full Profile & Salary Structure"
@@ -626,6 +638,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
                             <Eye className="w-3.5 h-3.5 text-slate-600" />
                           </button>
                           <button
+                            type="button"
                             onClick={() => openEditModal(emp)}
                             className="p-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800 transition cursor-pointer"
                             title="Edit Employee & Salary"
@@ -633,6 +646,19 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            type="button"
+                            onClick={() => {
+                              setDeviceResetError('');
+                              setDeviceResetReason('');
+                              setResetDeviceModalEmp(emp);
+                            }}
+                            className="p-1.5 rounded-xl bg-white border border-amber-200 text-amber-700 hover:bg-amber-50 transition cursor-pointer"
+                            title="Unbind / Reset Employee Hardware Device"
+                          >
+                            <Smartphone className="w-3.5 h-3.5 text-amber-600" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setResetPassModalEmp(emp)}
                             className="p-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition cursor-pointer"
                             title="Reset Temporary Password"
@@ -646,6 +672,114 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
                 })}
               </tbody>
             </table>
+          )}
+        </div>
+
+        {/* Mobile & Small Screen Cards */}
+        <div className="mt-4 block md:hidden space-y-3">
+          {loading ? (
+            <div className="py-8 text-center text-xs text-slate-400 font-medium">Loading workforce records...</div>
+          ) : filteredEmployees.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400 font-medium">No staff members found matching query.</div>
+          ) : (
+            filteredEmployees.map((emp) => (
+              <div
+                key={emp.employeeId}
+                className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center space-x-3">
+                    <EmployeeAvatar
+                      name={emp.fullName}
+                      size="md"
+                      status={emp.accountStatus === 'ACTIVE' ? 'ACTIVE' : null}
+                    />
+                    <div>
+                      <div className="font-bold text-sm text-slate-900">{emp.fullName}</div>
+                      <div className="font-mono text-[10px] text-slate-500 font-medium">
+                        {emp.employeeId} &bull; @{emp.username || emp.employeeId}
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                        {emp.designation || 'Staff'} &bull; {emp.department || 'Operations'}
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      emp.accountStatus === 'ACTIVE'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-slate-100 text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    {emp.accountStatus || 'ACTIVE'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-semibold">Device Lock:</span>
+                    {emp.boundHardwareSignature || emp.isDeviceBound ? (
+                      <span className="font-semibold text-emerald-700 text-[11px] flex items-center space-x-1">
+                        <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                        <span>1:1 Bound</span>
+                      </span>
+                    ) : (
+                      <span className="font-medium text-slate-500 text-[11px]">Unbound</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-semibold">Joining Date:</span>
+                    <span className="font-mono text-slate-700 text-[11px] font-medium">
+                      {emp.joiningDate || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mobile Action Buttons */}
+                <div className="pt-2 border-t border-slate-100 grid grid-cols-4 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setViewEmployeeModalEmp(emp)}
+                    className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold flex flex-col items-center justify-center space-y-0.5 cursor-pointer touch-target"
+                    title="View Profile"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span className="text-[9px]">View</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(emp)}
+                    className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex flex-col items-center justify-center space-y-0.5 cursor-pointer touch-target"
+                    title="Edit Employee"
+                  >
+                    <Edit2 className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[9px]">Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeviceResetError('');
+                      setDeviceResetReason('');
+                      setResetDeviceModalEmp(emp);
+                    }}
+                    className="p-2 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-xs font-bold flex flex-col items-center justify-center space-y-0.5 cursor-pointer touch-target"
+                    title="Unbind Device"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="text-[9px]">Unbind</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setResetPassModalEmp(emp)}
+                    className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold flex flex-col items-center justify-center space-y-0.5 cursor-pointer touch-target"
+                    title="Reset Password"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 text-slate-600" />
+                    <span className="text-[9px]">Pass</span>
+                  </button>
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>
@@ -833,6 +967,50 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
                     No custom salary structure configured yet. Standard default slabs apply.
                   </div>
                 )}
+              </div>
+              {/* Section 4: Hardware Device Security Lock */}
+              <div>
+                <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-2 flex items-center space-x-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Hardware Device Lock & Binding</span>
+                </h4>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      {viewEmployeeModalEmp.boundHardwareSignature || viewEmployeeModalEmp.isDeviceBound ? (
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                          <span>1:1 Bound Active</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                          <span>Unbound / Ready to Register</span>
+                        </span>
+                      )}
+                    </div>
+                    {viewEmployeeModalEmp.boundHardwareSignature && (
+                      <div className="text-[11px] font-mono text-slate-500 mt-1.5">
+                        <span className="text-slate-400 font-sans text-[10px]">Lock Signature: </span>
+                        {viewEmployeeModalEmp.boundHardwareSignature}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const emp = viewEmployeeModalEmp;
+                      setViewEmployeeModalEmp(null);
+                      setDeviceResetError('');
+                      setDeviceResetReason('');
+                      setResetDeviceModalEmp(emp);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Unbind / Reset Device</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1708,6 +1886,86 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
                   className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold transition disabled:opacity-50 cursor-pointer"
                 >
                   {passResetLoading ? 'Updating...' : 'Set Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =============================================================
+          MODAL 5: UNBIND / RESET EMPLOYEE DEVICE
+          ============================================================= */}
+      {resetDeviceModalEmp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 text-slate-900">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-5">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center border border-amber-200">
+                <Smartphone className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">Unbind Hardware Device Lock</h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  {resetDeviceModalEmp.fullName} ({resetDeviceModalEmp.employeeId})
+                </p>
+              </div>
+            </div>
+
+            {deviceResetError && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{deviceResetError}</span>
+              </div>
+            )}
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Department:</span>
+                <span className="text-slate-800 font-bold">{resetDeviceModalEmp.department || 'Operations'}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-medium">Designation:</span>
+                <span className="text-slate-800 font-bold">{resetDeviceModalEmp.designation || 'Staff'}</span>
+              </div>
+              {resetDeviceModalEmp.boundHardwareSignature && (
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200/60">
+                  <span className="text-slate-500 font-medium">Current Lock Sig:</span>
+                  <span className="font-mono text-[11px] text-slate-700 font-semibold truncate max-w-[170px]">
+                    {resetDeviceModalEmp.boundHardwareSignature}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Unbinding this device immediately removes the 1:1 hardware restriction for <strong className="text-slate-900">{resetDeviceModalEmp.fullName}</strong>. The employee will be able to register and clock in from their new or repaired device on their next sign-in.
+            </p>
+
+            <form onSubmit={handleDeviceReset} className="space-y-4 text-xs">
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetDeviceModalEmp(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={deviceResetLoading}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold transition disabled:opacity-50 flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                >
+                  {deviceResetLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Unbinding...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Smartphone className="w-3.5 h-3.5" />
+                      <span>Confirm & Unbind Device</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
