@@ -16,6 +16,7 @@ import { auditRepository } from '../repositories/auditRepository';
 import { usersRepository } from '../repositories/usersRepository';
 import { storageRepository } from '../repositories/storageRepository';
 import { payrollRepository } from '../repositories/payrollRepository';
+import { deviceResetRequestsRepository } from '../repositories/deviceResetRequestsRepository';
 import { LeaveRecord, AttendanceRegularizationRequest, AppNotification } from '../../src/types';
 
 export const attendanceRouter = Router();
@@ -242,6 +243,7 @@ attendanceRouter.get('/my-device', async (req: AuthenticatedRequest, res: Respon
     const employee = await employeesRepository.getById(user.employeeId);
     const activeDev = await devicesRepository.getActiveByEmployeeId(user.employeeId);
     const allDevs = await devicesRepository.getByEmployeeId(user.employeeId);
+    const pendingReset = await deviceResetRequestsRepository.getPendingByEmployeeId(user.employeeId);
 
     return res.json({
       success: true,
@@ -249,7 +251,78 @@ attendanceRouter.get('/my-device', async (req: AuthenticatedRequest, res: Respon
       boundHardwareSignature: employee?.boundHardwareSignature,
       activeDevice: activeDev,
       deviceHistory: allDevs,
+      pendingResetRequest: pendingReset,
     });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/attendance/device/request-reset - Submit request for device unbinding/reset
+attendanceRouter.post('/device/request-reset', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  const { reason } = req.body;
+
+  if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'REASON_REQUIRED',
+      message: 'Please provide a reason for requesting a device reset (e.g., changed phone, browser cache cleared, device damaged).',
+    });
+  }
+
+  try {
+    // Check if there is already an active pending request
+    const existingPending = await deviceResetRequestsRepository.getPendingByEmployeeId(user.employeeId);
+    if (existingPending) {
+      return res.json({
+        success: true,
+        message: 'You already have a pending device reset request under review by Administrators.',
+        request: existingPending,
+      });
+    }
+
+    const employee = await employeesRepository.getById(user.employeeId);
+    const created = await deviceResetRequestsRepository.create({
+      employeeId: user.employeeId,
+      employeeName: user.fullName,
+      department: user.department || employee?.department || '',
+      designation: employee?.designation || '',
+      reason: reason.trim(),
+      currentDeviceId: employee?.activeDeviceId || null,
+      currentHardwareSignature: employee?.boundHardwareSignature || null,
+    });
+
+    await auditRepository.log({
+      actorId: user.employeeId,
+      actorName: user.fullName,
+      actorRole: 'employee',
+      action: 'DEVICE_RESET_REQUESTED',
+      targetId: created.id,
+      details: {
+        reason: reason.trim(),
+        employeeId: user.employeeId,
+        currentDeviceId: employee?.activeDeviceId,
+      },
+      ipAddress: req.ip || '127.0.0.1',
+    });
+
+    return res.json({
+      success: true,
+      message: 'Device reset request submitted successfully. An Administrator will review it shortly.',
+      request: created,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/attendance/device/my-reset-requests - History of device reset requests
+attendanceRouter.get('/device/my-reset-requests', async (req: AuthenticatedRequest, res: Response) => {
+  const user = req.user!;
+  try {
+    const requests = await deviceResetRequestsRepository.getByEmployeeId(user.employeeId);
+    return res.json({ success: true, requests });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

@@ -7,6 +7,9 @@ const CORRECTIONS_COLLECTION = 'attendanceCorrections';
 
 export interface AttendanceFilters {
   date?: string;
+  startDate?: string;
+  endDate?: string;
+  month?: string;
   employeeId?: string;
   siteId?: string;
   locationId?: string;
@@ -78,7 +81,16 @@ export const attendanceRepository = {
     if (filters.employeeId) {
       query = query.where('employeeId', '==', filters.employeeId.trim().toUpperCase());
     }
-    if (filters.date) {
+    if (filters.startDate && filters.endDate) {
+      query = query.where('businessDate', '>=', filters.startDate.trim()).where('businessDate', '<=', filters.endDate.trim());
+    } else if (filters.startDate) {
+      query = query.where('businessDate', '>=', filters.startDate.trim());
+    } else if (filters.endDate) {
+      query = query.where('businessDate', '<=', filters.endDate.trim());
+    } else if (filters.month) {
+      const cleanMonth = filters.month.trim();
+      query = query.where('businessDate', '>=', `${cleanMonth}-01`).where('businessDate', '<=', `${cleanMonth}-31`);
+    } else if (filters.date) {
       query = query.where('businessDate', '==', filters.date.trim());
     }
     if (filters.siteId) {

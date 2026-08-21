@@ -17,6 +17,7 @@ import { securityRepository } from '../repositories/securityRepository';
 import { auditRepository } from '../repositories/auditRepository';
 import { payrollRepository } from '../repositories/payrollRepository';
 import { masterRegisterRepository } from '../repositories/masterRegisterRepository';
+import { deviceResetRequestsRepository } from '../repositories/deviceResetRequestsRepository';
 import { deviceService } from '../services/deviceService';
 import { shiftService } from '../services/shiftService';
 import { payrollService, convertNumberToIndianWords } from '../services/payrollService';
@@ -1044,6 +1045,135 @@ adminRouter.get('/employees/:id/device-history', async (req: AuthenticatedReques
       activeDevice: activeDev || null,
       history: historyItems,
     });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/v1/admin/device-reset-requests - Pending or all device reset requests
+adminRouter.get('/device-reset-requests', async (req: AuthenticatedRequest, res: Response) => {
+  const { status } = req.query;
+
+  try {
+    let list = await deviceResetRequestsRepository.getAll();
+    if (status && status !== 'ALL') {
+      list = list.filter((r) => r.status === String(status));
+    }
+    return res.json({ success: true, count: list.length, requests: list });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/admin/device-reset-requests/:id/review - Approve or Reject device reset request
+adminRouter.post('/device-reset-requests/:id/review', async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { action, notes } = req.body;
+
+  if (!action || !['APPROVE', 'REJECT'].includes(action)) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_ACTION',
+      message: 'Action must be either APPROVE or REJECT.',
+    });
+  }
+
+  try {
+    const request = await deviceResetRequestsRepository.getById(id);
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        error: 'REQUEST_NOT_FOUND',
+        message: 'Device reset request not found.',
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const adminId = req.user!.employeeId;
+    const adminName = req.user!.fullName;
+
+    if (action === 'APPROVE') {
+      // Trigger actual device reset
+      await deviceService.resetDevice(
+        request.employeeId,
+        adminId,
+        adminName,
+        req.ip || '127.0.0.1'
+      );
+
+      // Update request record
+      await deviceResetRequestsRepository.update(id, {
+        status: 'APPROVED',
+        reviewedByAdminId: adminId,
+        reviewedByAdminName: adminName,
+        reviewedAt: nowIso,
+        reviewNotes: notes ? String(notes).trim() : 'Approved by Administrator',
+      });
+
+      // Send persistent notification to employee
+      await notificationsRepository.create({
+        id: `notif_dev_rst_${id}_${Date.now()}`,
+        employeeId: request.employeeId,
+        type: 'SECURITY_ALERT',
+        title: 'Device Reset Approved',
+        message: `Your device reset request has been APPROVED by ${adminName}. Your previous hardware binding was cleared. You may now log in and punch in from your new device to bind it.`,
+        date: new Date().toISOString().split('T')[0],
+        read: false,
+        actionType: 'VIEW_PROFILE',
+        createdAt: nowIso,
+      });
+
+      await auditRepository.log({
+        actorId: adminId,
+        actorName: adminName,
+        actorRole: 'admin',
+        action: 'DEVICE_RESET_APPROVED',
+        targetId: request.employeeId,
+        details: { requestId: id, employeeName: request.employeeName, notes },
+        ipAddress: req.ip || '127.0.0.1',
+      });
+
+      return res.json({
+        success: true,
+        message: `Device reset approved for ${request.employeeName} (${request.employeeId}). The employee can now bind their new device.`,
+      });
+    } else {
+      // REJECT
+      await deviceResetRequestsRepository.update(id, {
+        status: 'REJECTED',
+        reviewedByAdminId: adminId,
+        reviewedByAdminName: adminName,
+        reviewedAt: nowIso,
+        reviewNotes: notes ? String(notes).trim() : 'Rejected by Administrator',
+      });
+
+      await notificationsRepository.create({
+        id: `notif_dev_rst_${id}_${Date.now()}`,
+        employeeId: request.employeeId,
+        type: 'SECURITY_ALERT',
+        title: 'Device Reset Request Rejected',
+        message: `Your device reset request was REJECTED by ${adminName}. ${notes ? `Reason: ${notes}` : ''}`,
+        date: new Date().toISOString().split('T')[0],
+        read: false,
+        actionType: 'VIEW_PROFILE',
+        createdAt: nowIso,
+      });
+
+      await auditRepository.log({
+        actorId: adminId,
+        actorName: adminName,
+        actorRole: 'admin',
+        action: 'DEVICE_RESET_REJECTED',
+        targetId: request.employeeId,
+        details: { requestId: id, employeeName: request.employeeName, notes },
+        ipAddress: req.ip || '127.0.0.1',
+      });
+
+      return res.json({
+        success: true,
+        message: `Device reset request rejected for ${request.employeeName} (${request.employeeId}).`,
+      });
+    }
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -2129,32 +2259,61 @@ adminRouter.get('/audit-logs', async (req: AuthenticatedRequest, res: Response) 
   }
 });
 
-// Monthly Muster Report
+// Monthly & Custom Date Range Workforce Muster Report
 adminRouter.get('/reports', async (req: AuthenticatedRequest, res: Response) => {
-  const { month, department } = req.query;
-  const targetMonth = month ? String(month) : shiftService.getISTDateParts().yearMonth;
+  const { month, startDate, endDate, department, siteId } = req.query;
+  const ist = shiftService.getISTDateParts();
+  
+  let effStartDate: string;
+  let effEndDate: string;
+  let labelPeriod: string;
+
+  if (startDate && endDate) {
+    effStartDate = String(startDate).trim();
+    effEndDate = String(endDate).trim();
+    labelPeriod = `${effStartDate} to ${effEndDate}`;
+  } else if (month) {
+    const targetMonth = String(month).trim();
+    effStartDate = `${targetMonth}-01`;
+    effEndDate = `${targetMonth}-31`;
+    labelPeriod = targetMonth;
+  } else {
+    effStartDate = `${ist.yearMonth}-01`;
+    effEndDate = `${ist.yearMonth}-31`;
+    labelPeriod = ist.yearMonth;
+  }
 
   try {
     let employeeList = await employeesRepository.getAll();
     if (department && department !== 'ALL') {
       employeeList = employeeList.filter((e) => e.department === String(department));
     }
+    if (siteId && siteId !== 'ALL') {
+      employeeList = employeeList.filter((e) => (e.assignedSiteIds || []).includes(String(siteId)));
+    }
 
-    const allRecords = await attendanceRepository.queryRecords({});
+    // Query attendance records filtered by date range and site directly at repository layer
+    const filteredRecords = await attendanceRepository.queryRecords({
+      startDate: effStartDate,
+      endDate: effEndDate,
+      siteId: siteId && siteId !== 'ALL' ? String(siteId) : undefined,
+    });
     const allLeaves = await leavesRepository.getAll();
 
     const report = employeeList.map((emp) => {
-      const empRecords = allRecords.filter(
+      const empRecords = filteredRecords.filter(
         (r) =>
           r.employeeId === emp.employeeId &&
-          (r.businessDate || r.attendanceDate || '').startsWith(targetMonth)
+          (r.businessDate || r.attendanceDate || '') >= effStartDate &&
+          (r.businessDate || r.attendanceDate || '') <= effEndDate
       );
 
       const empLeaves = allLeaves.filter(
         (l) =>
           l.employeeId === emp.employeeId &&
           l.status === 'APPROVED' &&
-          (l.startDate.startsWith(targetMonth) || l.endDate.startsWith(targetMonth))
+          l.startDate <= effEndDate &&
+          l.endDate >= effStartDate
       );
 
       const presentFullDays = empRecords.filter((r) => r.attendanceStatus === 'PRESENT_FULL_DAY').length;
@@ -2170,7 +2329,9 @@ adminRouter.get('/reports', async (req: AuthenticatedRequest, res: Response) => 
         employeeId: emp.employeeId,
         employeeName: emp.fullName,
         department: emp.department,
-        month: targetMonth,
+        month: labelPeriod,
+        startDate: effStartDate,
+        endDate: effEndDate,
         presentFullDays,
         presentHalfDays,
         absentDays,
@@ -2181,7 +2342,13 @@ adminRouter.get('/reports', async (req: AuthenticatedRequest, res: Response) => 
       };
     });
 
-    return res.json({ success: true, month: targetMonth, report });
+    return res.json({
+      success: true,
+      month: labelPeriod,
+      startDate: effStartDate,
+      endDate: effEndDate,
+      report,
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

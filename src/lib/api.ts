@@ -21,6 +21,8 @@ import {
   MasterRegisterEntry,
   MasterRegisterStatus,
   DayWiseAttendanceEntry,
+  DeviceResetRequest,
+  DeviceBinding,
 } from '../types';
 
 const TOKEN_KEY = 'msc_auth_token_v51';
@@ -536,6 +538,35 @@ export const api = {
     return request('/api/v1/attendance/leaves');
   },
 
+  async getMyDevice(): Promise<{
+    success: boolean;
+    isBound: boolean;
+    boundHardwareSignature?: string | null;
+    activeDevice?: DeviceBinding | null;
+    deviceHistory?: DeviceBinding[];
+    pendingResetRequest?: DeviceResetRequest | null;
+  }> {
+    return request('/api/v1/attendance/my-device');
+  },
+
+  async requestDeviceReset(payload: { reason: string }): Promise<{
+    success: boolean;
+    message: string;
+    request: DeviceResetRequest;
+  }> {
+    return request('/api/v1/attendance/device/request-reset', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async getMyDeviceResetRequests(): Promise<{
+    success: boolean;
+    requests: DeviceResetRequest[];
+  }> {
+    return request('/api/v1/attendance/device/my-reset-requests');
+  },
+
   async getMyProfile(): Promise<{
     success: boolean;
     user: User;
@@ -796,11 +827,35 @@ export const api = {
     return request('/api/v1/admin/audit-logs');
   },
 
-  async getAdminReport(month?: string, department?: string): Promise<{ success: boolean; month: string; report: any[] }> {
+  async getAdminDeviceResetRequests(status?: string): Promise<{ success: boolean; count: number; requests: DeviceResetRequest[] }> {
+    const query = status && status !== 'ALL' ? `?status=${encodeURIComponent(status)}` : '';
+    return request(`/api/v1/admin/device-reset-requests${query}`);
+  },
+
+  async reviewDeviceResetRequest(id: string, action: 'APPROVE' | 'REJECT', notes?: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/device-reset-requests/${id}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ action, notes }),
+    });
+  },
+
+  async getAdminReport(
+    paramsOrMonth?: string | { month?: string; startDate?: string; endDate?: string; department?: string; siteId?: string },
+    deptParam?: string
+  ): Promise<{ success: boolean; month: string; startDate?: string; endDate?: string; report: any[] }> {
     const query = new URLSearchParams();
-    if (month) query.set('month', month);
-    if (department && department !== 'ALL') query.set('department', department);
-    return request(`/api/v1/admin/reports?${query.toString()}`);
+    if (typeof paramsOrMonth === 'string') {
+      if (paramsOrMonth) query.set('month', paramsOrMonth);
+      if (deptParam && deptParam !== 'ALL') query.set('department', deptParam);
+    } else if (paramsOrMonth && typeof paramsOrMonth === 'object') {
+      if (paramsOrMonth.startDate) query.set('startDate', paramsOrMonth.startDate);
+      if (paramsOrMonth.endDate) query.set('endDate', paramsOrMonth.endDate);
+      if (paramsOrMonth.month) query.set('month', paramsOrMonth.month);
+      if (paramsOrMonth.department && paramsOrMonth.department !== 'ALL') query.set('department', paramsOrMonth.department);
+      if (paramsOrMonth.siteId && paramsOrMonth.siteId !== 'ALL') query.set('siteId', paramsOrMonth.siteId);
+    }
+    const qs = query.toString();
+    return request(qs ? `/api/v1/admin/reports?${qs}` : '/api/v1/admin/reports');
   },
 
   // Cloud Scheduler triggers

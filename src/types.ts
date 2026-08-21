@@ -432,12 +432,12 @@ export interface AttendanceRegularizationRequest {
 export interface AppNotification {
   id: string;
   employeeId: string; // Employee ID or 'ALL' or 'ADMIN'
-  type: 'ATTENDANCE_ERROR' | 'REGULARIZATION' | 'LEAVE_STATUS' | 'ANNOUNCEMENT' | 'INFO';
+  type: 'ATTENDANCE_ERROR' | 'REGULARIZATION' | 'LEAVE_STATUS' | 'ANNOUNCEMENT' | 'INFO' | 'SECURITY_ALERT';
   title: string;
   message: string;
   date: string; // YYYY-MM-DD or ISO
   read: boolean;
-  actionType?: 'REGULARIZE_ATTENDANCE' | 'VIEW_LEAVE' | 'VIEW_ATTENDANCE' | 'OPEN_DRAWER';
+  actionType?: 'REGULARIZE_ATTENDANCE' | 'VIEW_LEAVE' | 'VIEW_ATTENDANCE' | 'OPEN_DRAWER' | 'VIEW_PROFILE';
   actionPayload?: {
     date?: string;
     recordId?: string;
@@ -683,5 +683,27 @@ export interface ProjectShiftParams {
 }
 
 export type ShiftMergeSitePayload = ProjectShiftParams;
+
+export type DeviceResetRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface DeviceResetRequest {
+  id: string;
+  requestId?: string;
+  employeeId: string;
+  employeeName: string;
+  department?: string;
+  designation?: string;
+  reason: string;
+  currentDeviceId?: string | null;
+  currentHardwareSignature?: string | null;
+  status: DeviceResetRequestStatus;
+  requestedAt: string;
+  reviewedByAdminId?: string | null;
+  reviewedByAdminName?: string | null;
+  reviewedAt?: string | null;
+  reviewNotes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 

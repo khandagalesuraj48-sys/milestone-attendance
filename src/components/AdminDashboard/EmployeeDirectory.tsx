@@ -153,7 +153,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
   const fetchEmployeesAndSites = async () => {
     try {
       setLoading(true);
-      const [empRes, siteRes] = await Promise.all([api.getEmployees(), api.getSites()]);
+      const [empRes, siteRes] = await Promise.all([
+        api.getEmployees(),
+        api.getSites(),
+      ]);
       setEmployees(empRes.employees || []);
       setSites(siteRes.sites || []);
       if (selectedSiteIds.length === 0 && siteRes.sites?.length > 0) {
