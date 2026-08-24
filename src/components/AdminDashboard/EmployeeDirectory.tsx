@@ -62,7 +62,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
   // New Employee Form State
   const [newEmpId, setNewEmpId] = useState('');
   const [newUsername, setNewUsername] = useState('');
-  const [newInitialPass, setNewInitialPass] = useState('');
+  const [newTempPassword, setNewTempPassword] = useState('');
   const [newFullName, setNewFullName] = useState('');
   const [newMobile, setNewMobile] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -162,11 +162,55 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
     e.preventDefault();
     setOnboardError('');
 
+    const cleanEmpId = newEmpId.trim();
+    const cleanUsername = newUsername.trim();
+    const cleanFullName = newFullName.trim();
+    const cleanMobile = newMobile.trim();
+    const cleanEmail = newEmail.trim();
+    const cleanDept = newDept.trim();
+    const cleanDesignation = newDesignation.trim();
+    const cleanTempPassword = newTempPassword.trim();
+
+    if (!cleanEmpId) {
+      setOnboardError('Employee ID is required.');
+      return;
+    }
+    if (!cleanUsername) {
+      setOnboardError('Username is required.');
+      return;
+    }
+    if (!cleanFullName) {
+      setOnboardError('Full Name is required.');
+      return;
+    }
+    if (!cleanTempPassword) {
+      setOnboardError('Temporary Password is required.');
+      return;
+    }
+    if (cleanTempPassword.length < 6) {
+      setOnboardError('Temporary Password must be at least 6 characters.');
+      return;
+    }
+    if (!cleanEmail) {
+      setOnboardError('Email Address is required.');
+      return;
+    }
+    if (!cleanMobile) {
+      setOnboardError('Mobile Number is required.');
+      return;
+    }
+    if (!cleanDept) {
+      setOnboardError('Department is required.');
+      return;
+    }
+    if (!cleanDesignation) {
+      setOnboardError('Designation is required.');
+      return;
+    }
     if (!newJoiningDate) {
       setOnboardError('Joining Date is mandatory for all new staff onboardings.');
       return;
     }
-
     if (selectedSiteIds.length === 0) {
       setOnboardError('Please select at least 1 project site for the employee.');
       return;
@@ -175,14 +219,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
     try {
       setOnboardLoading(true);
       await api.createEmployee({
-        employeeId: newEmpId.trim(),
-        username: newUsername.trim(),
-        initialPassword: newInitialPass,
-        fullName: newFullName.trim(),
-        mobile: newMobile.trim(),
-        email: newEmail.trim(),
-        department: newDept,
-        designation: newDesignation,
+        employeeId: cleanEmpId,
+        username: cleanUsername,
+        fullName: cleanFullName,
+        mobile: cleanMobile,
+        email: cleanEmail,
+        department: cleanDept,
+        designation: cleanDesignation,
+        tempPassword: cleanTempPassword,
         joiningDate: newJoiningDate,
         dateOfBirth: newDateOfBirth || undefined,
         reportingManagerId: newReportingManagerId || undefined,
@@ -193,7 +237,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
       setShowOnboardModal(false);
       setNewEmpId('');
       setNewUsername('');
-      setNewInitialPass('');
+      setNewTempPassword('');
       setNewFullName('');
       setNewMobile('');
       setNewEmail('');
@@ -1165,14 +1209,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ locations 
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-700 font-bold mb-1">Temporary Initial Password</label>
+                      <label className="block text-slate-700 font-bold mb-1">Temporary Password</label>
                       <input
                         type="text"
-                        value={newInitialPass}
-                        onChange={(e) => setNewInitialPass(e.target.value)}
-                        placeholder="Min. 8 characters"
+                        value={newTempPassword}
+                        onChange={(e) => setNewTempPassword(e.target.value)}
+                        placeholder="Min. 6 characters"
                         required
-                        minLength={8}
+                        minLength={6}
                         className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono focus:bg-white focus:outline-none"
                       />
                     </div>

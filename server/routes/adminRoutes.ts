@@ -180,10 +180,12 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
     assignedProjectSite,
     joiningDate,
     dateOfBirth,
+    reportingManagerId,
     tempPassword,
     mustChangePassword,
   } = req.body;
 
+  // 1. Mandatory Required Fields Check
   if (!employeeId || !username || !fullName || !mobile || !email || !department || !designation || !tempPassword) {
     return res.status(400).json({
       success: false,
@@ -197,15 +199,45 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
   const cleanEmail = String(email).trim().toLowerCase();
   const cleanMobile = String(mobile).trim();
   const cleanFullName = String(fullName).trim();
+  const cleanDept = String(department).trim();
+  const cleanDesignation = String(designation).trim();
+  const rawTempPass = String(tempPassword).trim();
+
+  // 2. Format & Policy Validations
+  const mobileRegex = /^[+]?[\d\s-]{7,15}$/;
+  if (!mobileRegex.test(cleanMobile)) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_MOBILE',
+      message: 'Invalid mobile number.',
+    });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(cleanEmail)) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_EMAIL',
+      message: 'Invalid email address.',
+    });
+  }
+
+  if (rawTempPass.length < 6) {
+    return res.status(400).json({
+      success: false,
+      error: 'WEAK_PASSWORD',
+      message: 'Temporary password does not meet the required password policy (minimum 6 characters).',
+    });
+  }
 
   try {
-    // 1. Check if employeeId or username already exists in repository
+    // 3. Check for duplicates in database before Auth creation
     const existingEmp = await employeesRepository.getById(cleanEmpId);
     if (existingEmp) {
       return res.status(400).json({
         success: false,
         error: 'EMPLOYEE_EXISTS',
-        message: `Employee ID ${cleanEmpId} is already registered.`,
+        message: `Employee ID ${cleanEmpId} already exists.`,
       });
     }
 
@@ -214,16 +246,25 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
       return res.status(400).json({
         success: false,
         error: 'USERNAME_EXISTS',
-        message: `Username '${cleanUsername}' is already taken.`,
+        message: `Username '${cleanUsername}' already exists.`,
       });
     }
 
-    // 2. Create user in Firebase Authentication
+    const existingEmailUser = await usersRepository.getByEmail(cleanEmail);
+    if (existingEmailUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'EMAIL_EXISTS',
+        message: `Email address '${cleanEmail}' already exists.`,
+      });
+    }
+
+    // 4. Create user in Firebase Authentication
     let uid: string;
     try {
       const authUser = await adminAuth.createUser({
         email: cleanEmail,
-        password: String(tempPassword).trim(),
+        password: rawTempPass,
         displayName: cleanFullName,
       });
       uid = authUser.uid;
@@ -232,76 +273,109 @@ adminRouter.post('/employees', async (req: AuthenticatedRequest, res: Response) 
         return res.status(400).json({
           success: false,
           error: 'EMAIL_EXISTS',
-          message: `Email address '${cleanEmail}' is already registered in Firebase Authentication.`,
+          message: 'Email already exists.',
         });
       }
-      throw authErr;
+      if (authErr.code === 'auth/invalid-email') {
+        return res.status(400).json({
+          success: false,
+          error: 'INVALID_EMAIL',
+          message: 'Invalid email address.',
+        });
+      }
+      if (authErr.code === 'auth/weak-password' || authErr.code === 'auth/invalid-password') {
+        return res.status(400).json({
+          success: false,
+          error: 'WEAK_PASSWORD',
+          message: 'Temporary password does not meet the required password policy.',
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        error: 'AUTH_ERROR',
+        message: authErr.message || 'Firebase Authentication user creation failed.',
+      });
     }
 
-    const nowIso = new Date().toISOString();
+    // 5. Firestore Persistence with Auth Rollback on Failure
+    try {
+      const nowIso = new Date().toISOString();
 
-    // 3. Create User doc in users repository
-    await usersRepository.create(uid, {
-      uid,
-      id: uid,
-      employeeId: cleanEmpId,
-      username: cleanUsername,
-      email: cleanEmail,
-      fullName: cleanFullName,
-      role: 'employee',
-      accountStatus: 'ACTIVE',
-      mustChangePassword: mustChangePassword !== false,
-      department: String(department).trim(),
-      designation: String(designation).trim(),
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    });
+      // Create User doc in users repository
+      await usersRepository.create(uid, {
+        uid,
+        id: uid,
+        employeeId: cleanEmpId,
+        username: cleanUsername,
+        email: cleanEmail,
+        fullName: cleanFullName,
+        role: 'employee',
+        accountStatus: 'ACTIVE',
+        mustChangePassword: mustChangePassword !== false,
+        department: cleanDept,
+        designation: cleanDesignation,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
 
-    // 4. Create Employee profile doc
-    const newEmployee: Employee = {
-      employeeId: cleanEmpId,
-      username: cleanUsername,
-      fullName: cleanFullName,
-      mobile: cleanMobile,
-      email: cleanEmail,
-      department: String(department).trim(),
-      designation: String(designation).trim(),
-      joiningDate: joiningDate || nowIso.split('T')[0],
-      dateOfBirth: dateOfBirth || undefined,
-      assignedSiteIds: Array.isArray(assignedSiteIds) ? assignedSiteIds : assignedProjectSite ? [assignedProjectSite] : [],
-      assignedLocationIds: Array.isArray(assignedLocationIds) ? assignedLocationIds : [],
-      assignedProjectSite: assignedProjectSite || (Array.isArray(assignedSiteIds) ? assignedSiteIds[0] : ''),
-      accountStatus: 'ACTIVE',
-      boundHardwareSignature: null,
-      activeDeviceId: null,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
+      // Create Employee profile doc
+      const newEmployee: Employee = {
+        employeeId: cleanEmpId,
+        username: cleanUsername,
+        fullName: cleanFullName,
+        mobile: cleanMobile,
+        email: cleanEmail,
+        department: cleanDept,
+        designation: cleanDesignation,
+        joiningDate: joiningDate || nowIso.split('T')[0],
+        dateOfBirth: dateOfBirth || undefined,
+        reportingManagerId: reportingManagerId || undefined,
+        assignedSiteIds: Array.isArray(assignedSiteIds) ? assignedSiteIds : assignedProjectSite ? [assignedProjectSite] : [],
+        assignedLocationIds: Array.isArray(assignedLocationIds) ? assignedLocationIds : [],
+        assignedProjectSite: assignedProjectSite || (Array.isArray(assignedSiteIds) ? assignedSiteIds[0] : ''),
+        accountStatus: 'ACTIVE',
+        boundHardwareSignature: null,
+        activeDeviceId: null,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
 
-    await employeesRepository.create(newEmployee);
+      await employeesRepository.create(newEmployee);
 
-    // 5. Initialize leave balance
-    await leaveLedgerRepository.getBalance(cleanEmpId, cleanFullName, String(department).trim());
+      // Initialize leave balance
+      await leaveLedgerRepository.getBalance(cleanEmpId, cleanFullName, cleanDept).catch(() => {});
 
-    // 6. Log audit event
-    await auditRepository.log({
-      actorId: req.user!.employeeId,
-      actorName: req.user!.fullName,
-      actorRole: 'admin',
-      action: 'EMPLOYEE_CREATED',
-      targetId: cleanEmpId,
-      details: { username: cleanUsername, email: cleanEmail, department },
-      ipAddress: req.ip || '127.0.0.1',
-    });
+      // Log audit event
+      await auditRepository.log({
+        actorId: req.user!.employeeId,
+        actorName: req.user!.fullName,
+        actorRole: 'admin',
+        action: 'EMPLOYEE_CREATED',
+        targetId: cleanEmpId,
+        details: { username: cleanUsername, email: cleanEmail, department: cleanDept },
+        ipAddress: req.ip || '127.0.0.1',
+      }).catch(() => {});
 
-    return res.status(201).json({
-      success: true,
-      message: `Employee ${cleanFullName} (${cleanEmpId}) created successfully.`,
-      employee: newEmployee,
-    });
+      return res.status(201).json({
+        success: true,
+        message: `Employee ${cleanFullName} (${cleanEmpId}) created successfully.`,
+        employee: newEmployee,
+      });
+    } catch (dbErr: any) {
+      // Rollback Auth user if Firestore write fails to prevent orphaned Auth accounts
+      if (uid) {
+        try {
+          await adminAuth.deleteUser(uid);
+          console.log(`[EmployeeCreation] Rolled back Auth user ${uid} after database write failure.`);
+        } catch (cleanupErr) {
+          console.error('[EmployeeCreation] Failed to delete orphaned Auth user:', cleanupErr);
+        }
+      }
+      throw dbErr;
+    }
   } catch (err: any) {
     console.error('Failed to create employee:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message || 'Internal server error while creating employee.' });
   }
 });
 
