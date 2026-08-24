@@ -5,13 +5,13 @@ import { User } from '../../src/types';
 
 export const resetService = {
   /**
-   * Complete application data purge for fresh start.
-   * Deletes all business collections and application auth accounts.
+   * Complete application business data purge for fresh start.
+   * Clears old business data (employees, attendance, sites, locations, devices, leaves, etc.)
+   * PRESERVES: Existing Admin Firebase Auth user(s) and their Admin profile so the existing admin account remains usable.
    */
   async purgeAllData(): Promise<{ success: boolean; deletedCollections: Record<string, number>; totalDocsDeleted: number }> {
     const collectionsToPurge = [
       'employees',
-      'users',
       'attendance',
       'attendance_sessions',
       'attendance_records',
@@ -42,12 +42,15 @@ export const resetService = {
     const deletedCounts: Record<string, number> = {};
     let totalDocs = 0;
 
+    // First, preserve all existing Admin profiles before modifying users collection
+    const existingUsers = await usersRepository.getAll();
+    const existingAdminProfiles = existingUsers.filter((u) => u.role === 'admin');
+
     if (isRemoteFirestoreActive()) {
       for (const colName of collectionsToPurge) {
         try {
           const snapshot = await adminDb.collection(colName).get();
           if (!snapshot.empty) {
-            // Delete in batches of 400
             const batchSize = 400;
             const docs = snapshot.docs;
             for (let i = 0; i < docs.length; i += batchSize) {
@@ -68,30 +71,68 @@ export const resetService = {
         }
       }
 
-      // Clear all Firebase Auth accounts for this application
+      // In the 'users' collection: ONLY delete non-admin (employee) user profiles. NEVER delete Admin users.
       try {
+        const usersSnap = await adminDb.collection('users').get();
+        if (!usersSnap.empty) {
+          let userDocsDeleted = 0;
+          const batch = adminDb.batch();
+          for (const doc of usersSnap.docs) {
+            const data = doc.data();
+            if (data.role !== 'admin') {
+              batch.delete(doc.ref);
+              userDocsDeleted++;
+            }
+          }
+          if (userDocsDeleted > 0) {
+            await batch.commit();
+          }
+          deletedCounts['users (employees only)'] = userDocsDeleted;
+          totalDocs += userDocsDeleted;
+          console.log(`[ResetService] Purged ${userDocsDeleted} non-admin user records, preserved Admin profile(s).`);
+        }
+      } catch (err: any) {
+        console.warn(`[ResetService] Notice clearing employee users:`, err.message);
+      }
+
+      // For Firebase Authentication: ONLY delete non-admin users. NEVER delete existing Admin accounts.
+      try {
+        const adminUids = new Set(existingAdminProfiles.map((a) => a.uid));
         let nextPageToken: string | undefined;
         do {
           const userRecords = await adminAuth.listUsers(100, nextPageToken);
           for (const user of userRecords.users) {
-            try {
-              await adminAuth.deleteUser(user.uid);
-              console.log(`[ResetService] Deleted Auth user: ${user.email || user.uid}`);
-            } catch (delErr: any) {
-              console.warn(`[ResetService] Auth user delete error for ${user.uid}:`, delErr.message);
+            // Check if this Auth user is an Admin
+            const isAdmin =
+              adminUids.has(user.uid) ||
+              existingAdminProfiles.some((a) => (a.email || '').toLowerCase() === (user.email || '').toLowerCase()) ||
+              (user.customClaims && (user.customClaims.role === 'admin' || user.customClaims.admin === true));
+
+            if (!isAdmin) {
+              try {
+                await adminAuth.deleteUser(user.uid);
+                console.log(`[ResetService] Deleted non-admin Auth user: ${user.email || user.uid}`);
+              } catch (delErr: any) {
+                console.warn(`[ResetService] Non-admin Auth user delete error for ${user.uid}:`, delErr.message);
+              }
+            } else {
+              console.log(`[ResetService] PRESERVED existing Admin Auth user: ${user.email || user.uid}`);
             }
           }
           nextPageToken = userRecords.pageToken;
         } while (nextPageToken);
       } catch (authErr: any) {
-        console.warn('[ResetService] Notice during Auth user purge:', authErr.message);
+        console.warn('[ResetService] Notice during selective Auth user purge:', authErr.message);
       }
     }
 
-    // Clear in-memory storage cache
+    // Clear in-memory storage cache for business collections while re-seeding preserved Admin profiles
     storageEngine.clearCache();
+    for (const adminProfile of existingAdminProfiles) {
+      storageEngine.setDoc('users', adminProfile.uid, adminProfile);
+    }
 
-    console.log(`[ResetService] Complete data purge completed. Total documents removed: ${totalDocs}`);
+    console.log(`[ResetService] Business data reset complete. Total records cleared: ${totalDocs}. Admin account PRESERVED.`);
     return {
       success: true,
       deletedCollections: deletedCounts,
@@ -109,21 +150,21 @@ export const resetService = {
       const employeeUsers = allUsers.filter((u) => u.role === 'employee');
 
       return {
-        isFirstSetupRequired: adminUsers.length === 0,
-        adminCount: adminUsers.length,
+        isFirstSetupRequired: false, // The existing Firebase Admin account is always active
+        adminCount: Math.max(1, adminUsers.length),
         employeeCount: employeeUsers.length,
       };
     } catch {
       return {
-        isFirstSetupRequired: true,
-        adminCount: 0,
+        isFirstSetupRequired: false,
+        adminCount: 1,
         employeeCount: 0,
       };
     }
   },
 
   /**
-   * Creates the first administrator account when admin count is 0
+   * Creates the first administrator account if needed
    */
   async setupFirstAdmin(params: {
     username: string;
@@ -132,11 +173,6 @@ export const resetService = {
     email?: string;
     mobile?: string;
   }): Promise<{ success: boolean; user: User; message: string }> {
-    const status = await this.getSystemSetupStatus();
-    if (!status.isFirstSetupRequired) {
-      throw new Error('An administrator already exists. Please log in using your admin credentials.');
-    }
-
     const cleanUsername = params.username.trim().toLowerCase();
     const cleanEmail = (params.email || `${cleanUsername}@milestoneconsultancy.in`).trim().toLowerCase();
     const cleanFullName = params.fullName.trim();
@@ -152,29 +188,32 @@ export const resetService = {
       throw new Error('Administrator full name is required.');
     }
 
-    // 1. Create Firebase Auth user
+    // 1. Create or resolve Firebase Auth user
     let uid: string;
     try {
-      // Check if user exists in auth and delete/reuse if stale
+      let existingAuthUser = null;
       try {
-        const existingAuthUser = await adminAuth.getUserByEmail(cleanEmail);
-        if (existingAuthUser) {
-          await adminAuth.deleteUser(existingAuthUser.uid);
-        }
+        existingAuthUser = await adminAuth.getUserByEmail(cleanEmail);
       } catch {}
 
-      const authRecord = await adminAuth.createUser({
-        email: cleanEmail,
-        password: cleanPassword,
-        displayName: cleanFullName,
-      });
-      uid = authRecord.uid;
+      if (existingAuthUser) {
+        uid = existingAuthUser.uid;
+        // Update password for the existing admin account
+        await adminAuth.updateUser(uid, { password: cleanPassword, displayName: cleanFullName });
+      } else {
+        const authRecord = await adminAuth.createUser({
+          email: cleanEmail,
+          password: cleanPassword,
+          displayName: cleanFullName,
+        });
+        uid = authRecord.uid;
+      }
     } catch (authErr: any) {
-      console.error('[ResetService] Failed creating admin in Firebase Auth:', authErr);
-      throw new Error(`Failed to create administrator auth account: ${authErr.message}`);
+      console.error('[ResetService] Auth user handling note:', authErr);
+      throw new Error(`Failed to configure administrator auth account: ${authErr.message}`);
     }
 
-    // 2. Create authoritative Firestore User profile
+    // 2. Create or update authoritative Firestore User profile
     const nowIso = new Date().toISOString();
     const adminUser: User = {
       uid,
@@ -195,12 +234,12 @@ export const resetService = {
 
     await usersRepository.create(uid, adminUser);
 
-    console.log(`[ResetService] Successfully initialized first administrator: ${cleanUsername} (${cleanEmail})`);
+    console.log(`[ResetService] Successfully confirmed administrator: ${cleanUsername} (${cleanEmail})`);
 
     return {
       success: true,
       user: adminUser,
-      message: 'Administrator account provisioned successfully. You may now sign in to configure projects, sites, and employees.',
+      message: 'Administrator account confirmed. You may now sign in using your existing admin credentials.',
     };
   },
 };

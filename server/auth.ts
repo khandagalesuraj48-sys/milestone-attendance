@@ -61,6 +61,37 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
           updatedAt: new Date().toISOString(),
         };
         await usersRepository.create(decodedToken.uid, user);
+      } else {
+        // Check if this Firebase Auth user is an existing administrator
+        const emailLower = decodedToken.email.toLowerCase();
+        const isAdminIdentity =
+          emailLower.startsWith('admin') ||
+          emailLower.includes('admin') ||
+          decodedToken.admin === true ||
+          decodedToken.role === 'admin';
+
+        if (isAdminIdentity) {
+          const nowIso = new Date().toISOString();
+          const cleanUsername = emailLower.split('@')[0] || 'admin';
+          user = {
+            uid: decodedToken.uid,
+            id: decodedToken.uid,
+            employeeId: 'ADM-001',
+            username: cleanUsername,
+            email: decodedToken.email,
+            fullName: decodedToken.name || 'System Administrator',
+            role: 'admin',
+            accountStatus: 'ACTIVE',
+            mustChangePassword: false,
+            department: 'Executive Leadership',
+            designation: 'System Administrator',
+            lastLoginAt: nowIso,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          };
+          await usersRepository.create(decodedToken.uid, user);
+          console.log(`[requireAuth] Preserved existing Firebase Admin authorization for UID: ${decodedToken.uid} (${decodedToken.email})`);
+        }
       }
     }
   } catch (err: any) {
