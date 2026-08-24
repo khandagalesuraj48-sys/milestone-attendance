@@ -76,6 +76,11 @@ export const regularizationRepository = {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
 
+  async getPending(): Promise<AttendanceRegularizationRequest[]> {
+    const all = await this.getAll();
+    return all.filter((r) => r.status === 'PENDING');
+  },
+
   async create(req: AttendanceRegularizationRequest): Promise<AttendanceRegularizationRequest> {
     storageEngine.setDoc(REGULARIZATIONS_COLLECTION, req.id, req);
 

@@ -13,14 +13,9 @@ import {
   LeaveRecord,
   SecurityEvent,
   AuditLog,
-  PayrollRun,
-  PayrollItem,
-  SalarySlip,
   ShiftMergeSitePayload,
   MasterRegisterSummary,
   MasterRegisterEntry,
-  MasterRegisterStatus,
-  DayWiseAttendanceEntry,
   DeviceResetRequest,
   DeviceBinding,
 } from '../types';
@@ -41,7 +36,7 @@ export async function getIdTokenSafe(forceRefresh = false): Promise<string | nul
         localStorage.setItem(TOKEN_KEY, token);
       }
     } catch (e: any) {
-      console.warn('Firebase getIdToken note (using cached token):', e?.message || e);
+      console.warn('Firebase getIdToken note:', e?.message || e);
     }
   }
   return token;
@@ -83,54 +78,10 @@ async function request<T = any>(endpoint: string, options: RequestInit = {}): Pr
   }
 
   if (!res.ok) {
-    // If token is rejected or invalid, clear local token to prevent cascading failure loops
     if (res.status === 401) {
       localStorage.removeItem(TOKEN_KEY);
     }
     const error = new Error(data.message || data.error || 'Server error occurred');
-    (error as any).status = res.status;
-    (error as any).data = data;
-    throw error;
-  }
-  return data as T;
-}
-
-async function uploadRequest<T = any>(endpoint: string, formData: FormData): Promise<T> {
-  const token = await getIdTokenSafe();
-
-  const headers: Record<string, string> = {};
-  if (token && token.trim().length > 0) {
-    headers['Authorization'] = `Bearer ${token.trim()}`;
-  }
-
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: formData,
-  });
-
-  const contentType = res.headers.get('content-type') || '';
-  let data: any;
-  if (contentType.includes('application/json')) {
-    data = await res.json();
-  } else {
-    const rawText = await res.text();
-    try {
-      data = JSON.parse(rawText);
-    } catch {
-      data = {
-        success: false,
-        error: res.statusText || 'SERVER_ERROR',
-        message: rawText && !rawText.startsWith('<') ? rawText : `Server responded with status ${res.status}`,
-      };
-    }
-  }
-
-  if (!res.ok) {
-    if (res.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
-    }
-    const error = new Error(data.message || data.error || 'Upload failed');
     (error as any).status = res.status;
     (error as any).data = data;
     throw error;
@@ -157,7 +108,31 @@ export const api = {
 
   request,
 
-  // Auth Endpoints
+  // SYSTEM SETUP & FIRST-ADMIN STATUS
+  async getSystemStatus(): Promise<{ success: boolean; isFirstSetupRequired: boolean; adminCount: number; employeeCount: number }> {
+    return request('/api/v1/auth/system-status');
+  },
+
+  async setupFirstAdmin(payload: {
+    username: string;
+    password: string;
+    fullName: string;
+    email?: string;
+    mobile?: string;
+  }): Promise<{ success: boolean; user: User; message: string }> {
+    return request('/api/v1/auth/setup-first-admin', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async purgeAllData(): Promise<{ success: boolean; message: string }> {
+    return request('/api/v1/admin/system/reset-data', {
+      method: 'POST',
+    });
+  },
+
+  // AUTH ENDPOINTS
   async login(usernameOrEmail: string, password: string): Promise<{ token: string; user: User }> {
     const installationKey = getOrCreateInstallationKey();
     const cleanInput = usernameOrEmail.trim();
@@ -248,16 +223,16 @@ export const api = {
     }
   },
 
-  // Common Sites & Locations
+  // COMMON SITES & LOCATIONS
   async getSites(): Promise<{ success: boolean; sites: Site[] }> {
-    return request('/api/v1/sites');
+    return request('/api/v1/attendance/sites');
   },
 
   async getLocations(): Promise<{ success: boolean; locations: LocationSite[] }> {
-    return request('/api/v1/locations');
+    return request('/api/v1/attendance/locations');
   },
 
-  // Employee Attendance Endpoints
+  // EMPLOYEE ATTENDANCE ENDPOINTS
   async punchIn(payload: {
     shiftType: 'DAY' | 'NIGHT';
     latitude: number;
@@ -299,214 +274,64 @@ export const api = {
 
   async getMyToday(): Promise<{
     success: boolean;
-    date: string;
-    shifts: AttendanceRecord[];
+    hasActiveSession: boolean;
     activeSession: AttendanceRecord | null;
-    recentAutoSignOutNotice: { shiftType: string; businessDate?: string; date?: string; message: string } | null;
+    todayRecord: AttendanceRecord | null;
+    state: string;
+    shiftType: string | null;
+    isInsideGeofence?: boolean;
+    distanceMeters?: number;
+    shiftRules?: any;
   }> {
     return request('/api/v1/attendance/my-today');
   },
 
-  async getMyHistory(month?: string): Promise<{
+  async getMyHistory(params?: string | { startDate?: string; endDate?: string; month?: string }): Promise<{
     success: boolean;
-    month: string;
     records: AttendanceRecord[];
-    stats?: {
-      totalDaysRecorded: number;
-      lateCountInMonth: number;
-      fullDays: number;
-      halfDays: number;
-      absentDays: number;
-      extraNights: number;
-    };
+    stats?: any;
+    period: { startDate: string; endDate: string };
   }> {
-    const url = month ? `/api/v1/attendance/my-history?month=${month}` : '/api/v1/attendance/my-history';
-    return request(url);
+    let query = '';
+    if (typeof params === 'string') {
+      query = `month=${encodeURIComponent(params)}`;
+    } else if (params) {
+      query = new URLSearchParams(params as any).toString();
+    }
+    return request(`/api/v1/attendance/my-history?${query}`);
   },
 
-  async uploadFile(
-    file: File | Blob,
-    purpose: string = 'leave_attachment',
-    fileName?: string
-  ): Promise<{
-    success: boolean;
-    message: string;
-    file: {
-      id: string;
-      fileName: string;
-      fileType: string;
-      fileSize: number;
-      url: string;
-      purpose: string;
-      createdAt: string;
-    };
-  }> {
-    const resolvedName = fileName || (file instanceof File ? file.name : 'attachment.bin');
-    const resolvedType = (file instanceof File ? file.type : '') || 'application/octet-stream';
-    const fileSize = file.size;
-
-    // 1. Attempt direct client-to-storage upload via Firebase Storage Signed URL
-    // (Bypasses serverless payload limit for full 100MB direct upload support)
-    try {
-      const urlRes = await request<{
-        success: boolean;
-        fileId: string;
-        uploadUrl: string;
-        downloadUrl: string;
-        storagePath: string;
-      }>('/api/v1/storage/upload-url', {
-        method: 'POST',
-        body: JSON.stringify({
-          fileName: resolvedName,
-          fileType: resolvedType,
-          fileSize,
-          purpose,
-        }),
-      });
-
-      if (urlRes?.success && urlRes.uploadUrl) {
-        // Direct upload binary PUT to Firebase Cloud Storage bucket signed URL
-        const putRes = await fetch(urlRes.uploadUrl, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': resolvedType,
-          },
-          body: file,
-        });
-
-        if (putRes.ok) {
-          // Commit metadata to database
-          const commitRes = await request<{
-            success: boolean;
-            message: string;
-            file: any;
-          }>('/api/v1/storage/commit-direct-upload', {
-            method: 'POST',
-            body: JSON.stringify({
-              fileId: urlRes.fileId,
-              fileName: resolvedName,
-              fileType: resolvedType,
-              fileSize,
-              storagePath: urlRes.storagePath,
-              purpose,
-            }),
-          });
-
-          if (commitRes?.success) {
-            return commitRes;
-          }
-        }
-      }
-    } catch (directUploadErr) {
-      console.warn('[Direct Storage Upload] Signed URL path unavailable, using multipart upload fallback:', directUploadErr);
-    }
-
-    // 2. Multipart upload fallback to Express API
-    const formData = new FormData();
-    if (file instanceof File) {
-      formData.append('file', file, resolvedName);
-    } else {
-      formData.append('file', file, resolvedName);
-    }
-    formData.append('purpose', purpose);
-    return uploadRequest('/api/v1/storage/upload', formData);
+  // EMPLOYEE LEAVES & REGULARIZATION
+  async getMyLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {
+    return request('/api/v1/attendance/my-leaves');
   },
 
-  async getAuthenticatedFileUrl(rawUrl: string): Promise<string> {
-    if (!rawUrl) return '';
-    if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) {
-      return rawUrl;
-    }
-    const token = await getIdTokenSafe();
-    const separator = rawUrl.includes('?') ? '&' : '?';
-    return token ? `${rawUrl}${separator}token=${encodeURIComponent(token)}` : rawUrl;
-  },
-
-  async fetchAuthenticatedBlob(rawUrl: string): Promise<{ blob: Blob; objectUrl: string; fileName: string; contentType: string }> {
-    const token = await getIdTokenSafe();
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const separator = rawUrl.includes('?') ? '&' : '?';
-    const targetUrl = token && !rawUrl.includes('token=') ? `${rawUrl}${separator}token=${encodeURIComponent(token)}` : rawUrl;
-
-    const res = await fetch(targetUrl, { headers });
-    if (!res.ok) {
-      const errorText = await res.text();
-      let errorMsg = `HTTP ${res.status}`;
-      try {
-        const parsed = JSON.parse(errorText);
-        errorMsg = parsed.message || parsed.error || errorMsg;
-      } catch {
-        if (errorText && !errorText.startsWith('<')) errorMsg = errorText;
-      }
-      throw new Error(errorMsg);
-    }
-
-    const contentType = res.headers.get('content-type') || 'application/octet-stream';
-    const disposition = res.headers.get('content-disposition') || '';
-    let fileName = 'supporting_document';
-    const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-    if (match && match[1]) {
-      fileName = decodeURIComponent(match[1]);
-    } else {
-      const parts = rawUrl.split('/');
-      const last = parts[parts.length - 1].split('?')[0];
-      if (last) fileName = decodeURIComponent(last);
-    }
-
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    return { blob, objectUrl, fileName, contentType };
-  },
-
-  async downloadFile(rawUrl: string, fallbackFileName?: string): Promise<void> {
-    const { blob, fileName } = await this.fetchAuthenticatedBlob(rawUrl);
-    const downloadUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.download = fallbackFileName || fileName || 'document';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(downloadUrl);
-    }, 200);
-  },
-
-  async submitLeave(payload: {
+  async applyLeave(payload: {
     leaveType: string;
     startDate: string;
     endDate: string;
     reason: string;
-    attachmentUrl?: string | null;
-    attachmentName?: string | null;
-    attachmentType?: string | null;
-    attachmentSize?: number | null;
-    attachmentId?: string | null;
+    attachmentDataUrl?: string;
+    attachmentName?: string;
+    attachmentType?: string;
+    attachmentSize?: number;
   }): Promise<{ success: boolean; message: string; leave: LeaveRecord }> {
-    return request('/api/v1/attendance/leaves', {
+    return request('/api/v1/attendance/my-leaves', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   },
 
-  async getMyLeaveBalance(): Promise<{ success: boolean; balance: any; ledger: any[] }> {
-    return request('/api/v1/attendance/leaves/balance');
+  async getMyLeaveBalance(): Promise<{
+    success: boolean;
+    balance: any;
+    ledger: any[];
+  }> {
+    return request('/api/v1/attendance/my-leave-balance');
   },
 
-  async getNotifications(): Promise<{ success: boolean; notifications: any[] }> {
-    return request('/api/v1/attendance/notifications');
-  },
-
-  async markNotificationRead(id: string): Promise<any> {
-    return request(`/api/v1/attendance/notifications/${id}/read`, { method: 'PATCH' });
-  },
-
-  async markAllNotificationsRead(): Promise<any> {
-    return request('/api/v1/attendance/notifications/mark-all-read', { method: 'POST' });
+  async getMyRegularizations(): Promise<{ success: boolean; requests: any[] }> {
+    return request('/api/v1/attendance/my-regularize');
   },
 
   async submitRegularization(payload: {
@@ -516,241 +341,152 @@ export const api = {
     requestedSignOutTime: string;
     reason: string;
     attendanceRecordId?: string | null;
-    supportingDocUrl?: string | null;
-  }): Promise<{ success: boolean; message: string; request: any }> {
-    return request('/api/v1/attendance/regularize', {
+  }): Promise<{ success: boolean; message: string }> {
+    return request('/api/v1/attendance/my-regularize', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   },
 
-  async requestRegularization(payload: {
-    attendanceDate: string;
-    shiftType: string;
-    requestedSignInTime: string;
-    requestedSignOutTime: string;
-    reason: string;
-    attendanceRecordId?: string | null;
-    supportingDocUrl?: string | null;
-  }): Promise<{ success: boolean; message: string; request: any }> {
-    return this.submitRegularization(payload);
+  async getNotifications(): Promise<{ success: boolean; notifications: any[] }> {
+    return request('/api/v1/attendance/notifications');
   },
 
-  async getMyRegularizations(): Promise<{ success: boolean; requests: any[] }> {
-    return request('/api/v1/attendance/regularize/my-requests');
-  },
-
-  async getAdminRegularizations(): Promise<{ success: boolean; requests: any[] }> {
-    return request('/api/v1/admin/regularize');
-  },
-
-  async reviewRegularization(id: string, status: 'APPROVED' | 'REJECTED', reviewComment?: string): Promise<any> {
-    return request(`/api/v1/admin/regularize/${id}/review`, {
+  async markNotificationRead(id: string): Promise<{ success: boolean }> {
+    return request(`/api/v1/attendance/notifications/${id}/read`, {
       method: 'POST',
-      body: JSON.stringify({ status, reviewComment }),
     });
   },
 
-  async bulkAssignAccess(payload: {
-    employeeIds: string[];
-    targetType: 'PROJECT_SITE' | 'LOCATION';
-    targetId: string;
-    action: 'ASSIGN' | 'REMOVE';
-  }): Promise<{ success: boolean; message: string; modifiedCount: number }> {
-    return request('/api/v1/admin/access/bulk-assign', {
+  async getMyDeviceInfo(): Promise<{ success: boolean; isBound: boolean; device: any }> {
+    return request('/api/v1/attendance/my-device-info');
+  },
+
+  async requestDeviceReset(reason: string): Promise<{ success: boolean; message: string }> {
+    return request('/api/v1/attendance/request-device-reset', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ reason }),
     });
   },
 
-  async getHolidays(year?: number): Promise<{ success: boolean; holidays: any[] }> {
-    return request('/api/v1/attendance/holidays');
-  },
-
-  async getAdminHolidays(): Promise<{ success: boolean; holidays: any[] }> {
-    return request('/api/v1/admin/holidays');
-  },
-
-  async createHoliday(payload: { name: string; date: string; isMandatory?: boolean; description?: string }): Promise<any> {
-    return request('/api/v1/admin/holidays', {
+  async updateProfilePhoto(photoUrl: string): Promise<{ success: boolean; message: string; photoUrl: string; user: User }> {
+    return request('/api/v1/attendance/profile-photo', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ photoUrl }),
     });
   },
 
-  async updateHoliday(id: string, payload: any): Promise<any> {
-    return request(`/api/v1/admin/holidays/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-  },
-
-  async deleteHoliday(id: string): Promise<any> {
-    return request(`/api/v1/admin/holidays/${id}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async getAdminLeaveBalances(): Promise<{ success: boolean; balances: any[] }> {
-    return request('/api/v1/admin/leaves/balances');
-  },
-
-  async getMyLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {
-    return request('/api/v1/attendance/leaves');
-  },
-
-  async getMyDevice(): Promise<{
-    success: boolean;
-    isBound: boolean;
-    boundHardwareSignature?: string | null;
-    activeDevice?: DeviceBinding | null;
-    deviceHistory?: DeviceBinding[];
-    pendingResetRequest?: DeviceResetRequest | null;
-  }> {
-    return request('/api/v1/attendance/my-device');
-  },
-
-  async requestDeviceReset(payload: { reason: string }): Promise<{
-    success: boolean;
-    message: string;
-    request: DeviceResetRequest;
-  }> {
-    return request('/api/v1/attendance/device/request-reset', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-
-  async getMyDeviceResetRequests(): Promise<{
-    success: boolean;
-    requests: DeviceResetRequest[];
-  }> {
-    return request('/api/v1/attendance/device/my-reset-requests');
-  },
-
-  async getMyProfile(): Promise<{
-    success: boolean;
-    user: User;
-    employee?: Employee;
-    assignedSites?: Site[];
-  }> {
-    return request('/api/v1/attendance/my-profile');
-  },
-
-  async getTeamFeed(): Promise<{
-    success: boolean;
-    newTeamMembers: Array<{
-      employeeId: string;
-      employeeName: string;
-      designation: string;
-      siteName: string;
-      photoUrl?: string;
-      joiningDate?: string;
-    }>;
-    upcomingBirthdays: Array<{
-      employeeId: string;
-      employeeName: string;
-      designation: string;
-      siteName: string;
-      birthdayDate: string;
-      photoUrl?: string;
-    }>;
-    workAnniversaries: Array<{
-      employeeId: string;
-      employeeName: string;
-      designation: string;
-      siteName: string;
-      monthsCompleted: number;
-      photoUrl?: string;
-      joiningDate: string;
-    }>;
-    myMilestone: { months: number; text: string } | null;
-  }> {
-    return request('/api/v1/attendance/team-feed');
-  },
-
-  async uploadProfilePhoto(fileOrBase64: File | Blob | string): Promise<{ success: boolean; photoUrl: string; user: User }> {
-    if (typeof fileOrBase64 === 'string') {
-      return request('/api/v1/attendance/profile-photo', {
-        method: 'POST',
-        body: JSON.stringify({ photoUrl: fileOrBase64 }),
-      });
-    }
-    const formData = new FormData();
-    if (fileOrBase64 instanceof File) {
-      formData.append('file', fileOrBase64, fileOrBase64.name);
-    } else {
-      formData.append('file', fileOrBase64, 'avatar.jpg');
-    }
-    return uploadRequest('/api/v1/storage/profile-photo', formData);
-  },
-
-  async deleteProfilePhoto(): Promise<{ success: boolean; user: User }> {
+  async removeProfilePhoto(): Promise<{ success: boolean; message: string; user: User }> {
     return request('/api/v1/attendance/profile-photo', {
       method: 'DELETE',
     });
   },
 
-  // Admin Endpoints
-  async getAdminOverview(params?: {
-    date?: string;
-    siteId?: string;
-    locationId?: string;
-    department?: string;
-  }): Promise<{
+  // ADMIN ENDPOINTS
+  async getAdminOverview(params?: { date?: string; siteId?: string; locationId?: string; department?: string }): Promise<{
     success: boolean;
-    todayDate: string;
-    summary: Record<string, number>;
+    stats: any;
+    summary?: any;
+    siteBreakdown: any[];
     siteBreakdowns?: any[];
+    recentRecords: AttendanceRecord[];
     todayRecords?: AttendanceRecord[];
     allEmployees?: Employee[];
     allSites?: Site[];
     allLocations?: LocationSite[];
+    securityEvents: SecurityEvent[];
+    date: string;
   }> {
-    const query = new URLSearchParams();
-    if (params?.date) query.set('date', params.date);
-    if (params?.siteId && params.siteId !== 'ALL') query.set('siteId', params.siteId);
-    if (params?.locationId && params.locationId !== 'ALL') query.set('locationId', params.locationId);
-    if (params?.department && params.department !== 'ALL') query.set('department', params.department);
-    const qs = query.toString();
-    return request(qs ? `/api/v1/admin/overview?${qs}` : '/api/v1/admin/overview');
+    const query = new URLSearchParams(params as any).toString();
+    return request(`/api/v1/admin/overview?${query}`);
   },
 
-  async getEmployee(id: string): Promise<{ success: boolean; employee: Employee }> {
-    return request(`/api/v1/admin/employees/${id}`);
+  // Admin Employees
+  async getAdminEmployees(): Promise<{ success: boolean; employees: Employee[] }> {
+    return request('/api/v1/admin/employees');
   },
 
-  async getAdminSites(): Promise<{ success: boolean; sites: (Site & { locationsCount: number; assignedEmployeesCount: number })[] }> {
+  async getEmployees(): Promise<{ success: boolean; employees: Employee[] }> {
+    return this.getAdminEmployees();
+  },
+
+  async createEmployee(payload: any): Promise<{ success: boolean; message: string; employee: Employee }> {
+    return request('/api/v1/admin/employees', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async updateEmployee(id: string, payload: Partial<Employee> & { resetHardwareBinding?: boolean; salaryStructure?: any }): Promise<{ success: boolean; message: string; employee: Employee }> {
+    return request(`/api/v1/admin/employees/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteEmployee(id: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/employees/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async toggleEmployeeStatus(id: string): Promise<{ success: boolean; message: string; accountStatus: string }> {
+    return request(`/api/v1/admin/employees/${id}/toggle-status`, {
+      method: 'POST',
+    });
+  },
+
+  async resetEmployeeDevice(id: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/employees/${id}/reset-device`, {
+      method: 'POST',
+    });
+  },
+
+  async resetEmployeePassword(id: string, temporaryPassword: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/employees/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ temporaryPassword }),
+    });
+  },
+
+  // Admin Sites & Projects
+  async getAdminSites(): Promise<{ success: boolean; sites: Site[] }> {
     return request('/api/v1/admin/sites');
   },
 
-  async createSite(payload: { siteId?: string; siteName: string }): Promise<{ success: boolean; site: Site }> {
+  async createSite(payload: { siteId: string; siteName: string; isActive?: boolean }): Promise<{ success: boolean; site: Site }> {
     return request('/api/v1/admin/sites', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   },
 
-  async updateSite(id: string, payload: Partial<Site>): Promise<{ success: boolean; site: Site }> {
+  async updateSite(id: string, payload: { siteName?: string; isActive?: boolean }): Promise<{ success: boolean; site: Site }> {
     return request(`/api/v1/admin/sites/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
   },
 
+  async deleteSite(id: string): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/sites/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async shiftMergeSites(payload: ShiftMergeSitePayload): Promise<{ success: boolean; message: string; migratedEmployeesCount: number; migratedLocationsCount: number }> {
+    return request('/api/v1/admin/sites/shift-merge', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // Admin Locations
   async getAdminLocations(): Promise<{ success: boolean; locations: LocationSite[] }> {
     return request('/api/v1/admin/locations');
   },
 
-  async createLocation(payload: {
-    siteId: string;
-    locationName: string;
-    address?: string;
-    latitude: number;
-    longitude: number;
-    radiusMeters: number;
-    accuracyThresholdMeters?: number;
-  }): Promise<{ success: boolean; location: LocationSite }> {
+  async createLocation(payload: Partial<LocationSite>): Promise<{ success: boolean; location: LocationSite }> {
     return request('/api/v1/admin/locations', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -764,306 +500,351 @@ export const api = {
     });
   },
 
-  async deleteSite(id: string, cascadeOrForce?: boolean): Promise<{ success: boolean; message: string }> {
-    const query = cascadeOrForce ? '?force=true' : '';
-    return request(`/api/v1/admin/sites/${id}${query}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async shiftMergeSites(payload: ShiftMergeSitePayload): Promise<{ success: boolean; message: string; reassignedEmployees: number; reassignedLocations: number }> {
-    return request('/api/v1/admin/sites/shift-merge', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-
   async deleteLocation(id: string): Promise<{ success: boolean; message: string }> {
     return request(`/api/v1/admin/locations/${id}`, {
       method: 'DELETE',
     });
   },
 
-  async getEmployees(): Promise<{ success: boolean; employees: any[] }> {
-    return request('/api/v1/admin/employees');
-  },
-
-  async createEmployee(payload: any): Promise<{ success: boolean; message: string; employee: any }> {
-    return request('/api/v1/admin/employees', {
+  // Bulk Access
+  async bulkAssignAccess(payload: {
+    employeeIds: string[];
+    targetType: 'PROJECT_SITE' | 'LOCATION';
+    targetId: string;
+    action: 'ASSIGN' | 'REMOVE';
+  }): Promise<{ success: boolean; message: string; modifiedCount: number }> {
+    return request('/api/v1/admin/access/bulk-assign', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   },
 
-  async updateEmployee(id: string, payload: any): Promise<{ success: boolean; employee: any }> {
-    return request(`/api/v1/admin/employees/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-  },
-
-  async resetEmployeePassword(id: string, temporaryPassword?: string): Promise<any> {
-    return request(`/api/v1/admin/employees/${id}/reset-password`, {
-      method: 'POST',
-      body: JSON.stringify({ temporaryPassword }),
-    });
-  },
-
-  async resetEmployeeDevice(id: string): Promise<any> {
-    return request(`/api/v1/admin/employees/${id}/reset-device`, {
-      method: 'POST',
-    });
-  },
-
-  async getDeviceHistory(id: string): Promise<{
-    success: boolean;
-    employeeId: string;
-    employeeName: string;
-    currentStatus: 'BOUND' | 'UNBOUND';
-    unbindCount: number;
-    activeDevice: any;
-    history: any[];
-  }> {
-    return request(`/api/v1/admin/employees/${id}/device-history`);
-  },
-
+  // Admin Attendance & Corrections
   async getAdminAttendance(params?: {
     date?: string;
+    startDate?: string;
+    endDate?: string;
     employeeId?: string;
     siteId?: string;
     locationId?: string;
     shiftType?: string;
+    isExtraShift?: boolean | string;
     status?: string;
-    isExtraShift?: string;
-    isAutoSignedOut?: string;
-  }): Promise<{ success: boolean; count: number; records: AttendanceRecord[] }> {
+  }): Promise<{ success: boolean; records: AttendanceRecord[] }> {
     const query = new URLSearchParams(params as any).toString();
     return request(`/api/v1/admin/attendance?${query}`);
   },
 
-  // Alias for compatibility
-  async getAdminRegister(params?: any): Promise<{ success: boolean; count: number; records: AttendanceRecord[] }> {
-    return this.getAdminAttendance(params);
-  },
-
-  async correctAttendance(recordId: string, payload: {
-    newAttendanceStatus: string;
-    newSignInTime?: string;
-    newSignOutTime?: string;
-    administrativeReason: string;
-  }): Promise<{ success: boolean; message: string; record: AttendanceRecord }> {
-    return request(`/api/v1/admin/attendance/${recordId}/correct`, {
+  async correctAttendance(
+    payloadOrId: string | {
+      recordId: string;
+      newStatus?: string;
+      newAttendanceStatus?: string;
+      newSignInTime?: string | null;
+      newSignOutTime?: string | null;
+      reason?: string;
+      administrativeReason?: string;
+    },
+    optionalPayload?: {
+      newStatus?: string;
+      newAttendanceStatus?: string;
+      newSignInTime?: string | null;
+      newSignOutTime?: string | null;
+      reason?: string;
+      administrativeReason?: string;
+    }
+  ): Promise<{ success: boolean; message: string; record: AttendanceRecord }> {
+    let body: any = {};
+    if (typeof payloadOrId === 'string') {
+      body = {
+        recordId: payloadOrId,
+        newStatus: optionalPayload?.newAttendanceStatus || optionalPayload?.newStatus || 'PRESENT',
+        newSignInTime: optionalPayload?.newSignInTime,
+        newSignOutTime: optionalPayload?.newSignOutTime,
+        reason: optionalPayload?.administrativeReason || optionalPayload?.reason || 'Administrative Correction',
+      };
+    } else {
+      body = {
+        recordId: payloadOrId.recordId,
+        newStatus: payloadOrId.newAttendanceStatus || payloadOrId.newStatus || 'PRESENT',
+        newSignInTime: payloadOrId.newSignInTime,
+        newSignOutTime: payloadOrId.newSignOutTime,
+        reason: payloadOrId.administrativeReason || payloadOrId.reason || 'Administrative Correction',
+      };
+    }
+    return request('/api/v1/admin/attendance/correct', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
   },
 
-  async getRules(): Promise<{ success: boolean; rules: AttendanceRules }> {
-    return request('/api/v1/admin/rules');
-  },
-
-  async updateRules(payload: Partial<AttendanceRules>): Promise<{ success: boolean; rules: AttendanceRules }> {
-    return request('/api/v1/admin/rules', {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-  },
-
-  async getAllLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {
+  // Admin Leaves
+  async getAdminLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {
     return request('/api/v1/admin/leaves');
   },
 
-  async reviewLeave(id: string, status: 'APPROVED' | 'REJECTED', reviewComment?: string): Promise<any> {
+  async getAllLeaves(): Promise<{ success: boolean; leaves: LeaveRecord[] }> {
+    return this.getAdminLeaves();
+  },
+
+  async getAdminLeaveBalances(): Promise<{ success: boolean; balances: any[] }> {
+    return request('/api/v1/admin/leave-balances');
+  },
+
+  async reviewLeave(
+    id: string,
+    statusOrPayload: 'APPROVED' | 'REJECTED' | { status: 'APPROVED' | 'REJECTED'; reviewComment?: string },
+    optionalComment?: string
+  ): Promise<{ success: boolean; leave: LeaveRecord }> {
+    const payload = typeof statusOrPayload === 'string'
+      ? { status: statusOrPayload, reviewComment: optionalComment }
+      : statusOrPayload;
     return request(`/api/v1/admin/leaves/${id}/review`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status, reviewComment }),
-    });
-  },
-
-  async getSecurityEvents(): Promise<{ success: boolean; events: SecurityEvent[] }> {
-    return request('/api/v1/admin/security-events');
-  },
-
-  async getAuditLogs(): Promise<{ success: boolean; logs: AuditLog[] }> {
-    return request('/api/v1/admin/audit-logs');
-  },
-
-  async getAdminDeviceResetRequests(status?: string): Promise<{ success: boolean; count: number; requests: DeviceResetRequest[] }> {
-    const query = status && status !== 'ALL' ? `?status=${encodeURIComponent(status)}` : '';
-    return request(`/api/v1/admin/device-reset-requests${query}`);
-  },
-
-  async reviewDeviceResetRequest(id: string, action: 'APPROVE' | 'REJECT', notes?: string): Promise<{ success: boolean; message: string }> {
-    return request(`/api/v1/admin/device-reset-requests/${id}/review`, {
       method: 'POST',
-      body: JSON.stringify({ action, notes }),
-    });
-  },
-
-  async getAdminReport(
-    paramsOrMonth?: string | { month?: string; startDate?: string; endDate?: string; department?: string; siteId?: string },
-    deptParam?: string
-  ): Promise<{ success: boolean; month: string; startDate?: string; endDate?: string; report: any[] }> {
-    const query = new URLSearchParams();
-    if (typeof paramsOrMonth === 'string') {
-      if (paramsOrMonth) query.set('month', paramsOrMonth);
-      if (deptParam && deptParam !== 'ALL') query.set('department', deptParam);
-    } else if (paramsOrMonth && typeof paramsOrMonth === 'object') {
-      if (paramsOrMonth.startDate) query.set('startDate', paramsOrMonth.startDate);
-      if (paramsOrMonth.endDate) query.set('endDate', paramsOrMonth.endDate);
-      if (paramsOrMonth.month) query.set('month', paramsOrMonth.month);
-      if (paramsOrMonth.department && paramsOrMonth.department !== 'ALL') query.set('department', paramsOrMonth.department);
-      if (paramsOrMonth.siteId && paramsOrMonth.siteId !== 'ALL') query.set('siteId', paramsOrMonth.siteId);
-    }
-    const qs = query.toString();
-    return request(qs ? `/api/v1/admin/reports?${qs}` : '/api/v1/admin/reports');
-  },
-
-  // Cloud Scheduler triggers
-  async triggerSchedulerDay(): Promise<any> {
-    return request('/api/v1/internal/auto-sign-out/day', { method: 'POST' });
-  },
-
-  async triggerSchedulerNight(): Promise<any> {
-    return request('/api/v1/internal/auto-sign-out/night', { method: 'POST' });
-  },
-
-  // ==========================================
-  // PAYROLL & SALARY SLIP APIs
-  // ==========================================
-
-  async getPayrollRuns(): Promise<{ success: boolean; runs: PayrollRun[] }> {
-    return request('/api/v1/admin/payroll');
-  },
-
-  async generatePayroll(month: string): Promise<{ success: boolean; message: string; run: PayrollRun }> {
-    return request('/api/v1/admin/payroll/generate', {
-      method: 'POST',
-      body: JSON.stringify({ month }),
-    });
-  },
-
-  async getPayrollRun(id: string): Promise<{ success: boolean; run: PayrollRun }> {
-    return request(`/api/v1/admin/payroll/${id}`);
-  },
-
-  async updatePayrollItem(runId: string, itemId: string, payload: any): Promise<{ success: boolean; item: PayrollItem }> {
-    return request(`/api/v1/admin/payroll/${runId}/items/${itemId}`, {
-      method: 'PUT',
       body: JSON.stringify(payload),
     });
   },
 
-  async finalizePayroll(id: string): Promise<{ success: boolean; message: string }> {
-    return request(`/api/v1/admin/payroll/${id}/finalize`, {
+  // Admin Regularization
+  async getAdminRegularizations(): Promise<{ success: boolean; requests: any[] }> {
+    return request('/api/v1/admin/regularize');
+  },
+
+  async reviewRegularization(
+    id: string,
+    statusOrPayload: 'APPROVED' | 'REJECTED' | { status: 'APPROVED' | 'REJECTED'; reviewComment?: string },
+    optionalComment?: string
+  ): Promise<{ success: boolean; message: string }> {
+    const payload = typeof statusOrPayload === 'string'
+      ? { status: statusOrPayload, reviewComment: optionalComment }
+      : statusOrPayload;
+    return request(`/api/v1/admin/regularize/${id}/review`, {
       method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 
-  async publishPayroll(id: string): Promise<{ success: boolean; message: string }> {
-    return request(`/api/v1/admin/payroll/${id}/publish`, {
+  // Admin Devices & Security
+  async getAdminDevices(): Promise<{ success: boolean; devices: DeviceBinding[] }> {
+    return request('/api/v1/admin/devices');
+  },
+
+  async getAdminDeviceResetRequests(): Promise<{ success: boolean; requests: DeviceResetRequest[] }> {
+    return request('/api/v1/admin/devices/reset-requests');
+  },
+
+  async reviewDeviceResetRequest(id: string, payload: { status: 'APPROVED' | 'REJECTED'; reviewNotes?: string }): Promise<{ success: boolean; message: string }> {
+    return request(`/api/v1/admin/devices/reset-requests/${id}/review`, {
       method: 'POST',
+      body: JSON.stringify(payload),
     });
   },
 
-  async deletePayroll(id: string): Promise<{ success: boolean; message: string }> {
-    return request(`/api/v1/admin/payroll/${id}`, {
-      method: 'DELETE',
+  // Admin Policies
+  async getAdminPolicy(): Promise<{ success: boolean; rules: AttendanceRules }> {
+    return request('/api/v1/admin/policy');
+  },
+
+  async updateAdminPolicy(rules: Partial<AttendanceRules>): Promise<{ success: boolean; rules: AttendanceRules }> {
+    return request('/api/v1/admin/policy', {
+      method: 'PUT',
+      body: JSON.stringify(rules),
     });
   },
 
-  async getPayrollSlip(itemId: string): Promise<{ success: boolean; slip: SalarySlip }> {
-    return request(`/api/v1/admin/payroll/slips/${itemId}`);
+  // Security Events & Audit Logs
+  async getAdminSecurityEvents(): Promise<{ success: boolean; events: SecurityEvent[] }> {
+    return request('/api/v1/admin/security-events');
   },
 
-  async getMySalarySlips(): Promise<{ success: boolean; slips: SalarySlip[] }> {
-    return request('/api/v1/attendance/my-salary-slips');
+  async getSecurityEvents(): Promise<{ success: boolean; events: SecurityEvent[] }> {
+    return this.getAdminSecurityEvents();
   },
 
-  async getMySalarySlip(id: string): Promise<{ success: boolean; slip: SalarySlip }> {
-    return request(`/api/v1/attendance/my-salary-slips/${id}`);
+  async getAdminAuditLogs(): Promise<{ success: boolean; logs: AuditLog[] }> {
+    return request('/api/v1/admin/audit-logs');
   },
 
-  // ==========================================
-  // MASTER REGISTER & FINALIZATION APIs
-  // ==========================================
-
-  async getMasterRegister(params?: {
-    month?: string;
-    siteId?: string;
-    department?: string;
-  }): Promise<{ success: boolean; summary: MasterRegisterSummary }> {
-    const query = new URLSearchParams();
-    if (params?.month) query.set('month', params.month);
-    if (params?.siteId && params.siteId !== 'ALL') query.set('siteId', params.siteId);
-    if (params?.department && params.department !== 'ALL') query.set('department', params.department);
-    return request(`/api/v1/admin/master-register?${query.toString()}`);
+  async getAuditLogs(): Promise<{ success: boolean; logs: AuditLog[] }> {
+    return this.getAdminAuditLogs();
   },
 
-  async generateMasterRegister(month: string): Promise<{ success: boolean; message: string; summary: MasterRegisterSummary }> {
+  // Reports
+  async getAdminReports(params?: { month?: string; startDate?: string; endDate?: string; department?: string; siteId?: string }): Promise<{
+    success: boolean;
+    report: any[];
+    period: { startDate: string; endDate: string };
+    totalEmployees: number;
+  }> {
+    const query = new URLSearchParams(params as any).toString();
+    return request(`/api/v1/admin/reports?${query}`);
+  },
+
+  async getAdminReport(params?: { month?: string; startDate?: string; endDate?: string; department?: string; siteId?: string }): Promise<{
+    success: boolean;
+    report: any[];
+    period: { startDate: string; endDate: string };
+    totalEmployees: number;
+  }> {
+    return this.getAdminReports(params);
+  },
+
+  // Master Attendance Register
+  async getMasterRegister(month: string): Promise<{ success: boolean; summary: MasterRegisterSummary | null }> {
+    return request(`/api/v1/admin/master-register/${month}`);
+  },
+
+  async generateMasterRegister(month: string): Promise<{ success: boolean; summary: MasterRegisterSummary }> {
     return request('/api/v1/admin/master-register/generate', {
       method: 'POST',
       body: JSON.stringify({ month }),
     });
   },
 
-  async updateMasterRegisterEntry(
-    month: string,
-    entryId: string,
-    payload: {
-      adminFinalPresentDays?: number;
-      adminFinalAbsentDays?: number;
-      totalPayableDays?: number;
-      adminNotes?: string;
+  // Scheduler Triggers
+  async triggerSchedulerDay(): Promise<{ success: boolean; worker: string; modifiedCount: number; processedIds: string[] }> {
+    return request('/api/v1/admin/scheduler/day', { method: 'POST' });
+  },
+
+  async triggerSchedulerNight(): Promise<{ success: boolean; worker: string; modifiedCount: number; processedIds: string[] }> {
+    return request('/api/v1/admin/scheduler/night', { method: 'POST' });
+  },
+
+  // Device & Profile Aliases
+  async getMyDevice(): Promise<{ success: boolean; isBound: boolean; device: any; boundHardwareSignature?: string | null }> {
+    const res = await this.getMyDeviceInfo();
+    return {
+      success: res.success,
+      isBound: res.isBound,
+      device: res.device,
+      boundHardwareSignature: res.device?.hardwareSignature || null,
+    };
+  },
+
+  async getMyProfile(): Promise<{ success: boolean; user: User; employee: Employee | null; assignedSites: Site[] }> {
+    return request('/api/v1/attendance/my-profile');
+  },
+
+  async uploadProfilePhoto(fileOrBase64: File | Blob | string): Promise<{ success: boolean; message: string; photoUrl: string; user: User }> {
+    let photoUrl = '';
+    if (typeof fileOrBase64 === 'string') {
+      photoUrl = fileOrBase64;
+    } else {
+      photoUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(fileOrBase64);
+      });
     }
-  ): Promise<{ success: boolean; message: string; entry: MasterRegisterEntry }> {
-    return request(`/api/v1/admin/master-register/${month}/entries/${entryId}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
+    return this.updateProfilePhoto(photoUrl);
+  },
+
+  async deleteProfilePhoto(): Promise<{ success: boolean; message: string; user: User }> {
+    return this.removeProfilePhoto();
+  },
+
+  async markAllNotificationsRead(): Promise<{ success: boolean; message: string }> {
+    return request('/api/v1/attendance/notifications/mark-all-read', { method: 'POST' });
+  },
+
+  async submitLeave(payload: {
+    leaveType: string;
+    startDate: string;
+    endDate: string;
+    reason: string;
+    attachmentUrl?: string | null;
+    attachmentName?: string | null;
+    attachmentType?: string | null;
+    attachmentSize?: number | null;
+    attachmentId?: string | null;
+  }): Promise<{ success: boolean; message: string; leave: LeaveRecord }> {
+    return this.applyLeave({
+      leaveType: payload.leaveType,
+      startDate: payload.startDate,
+      endDate: payload.endDate,
+      reason: payload.reason,
+      attachmentDataUrl: payload.attachmentUrl || undefined,
+      attachmentName: payload.attachmentName || undefined,
+      attachmentType: payload.attachmentType || undefined,
+      attachmentSize: payload.attachmentSize || undefined,
     });
   },
 
-  async updateMasterRegisterStatus(
-    month: string,
-    status: MasterRegisterStatus
-  ): Promise<{ success: boolean; message: string; summary: MasterRegisterSummary }> {
-    return request(`/api/v1/admin/master-register/${month}/status`, {
-      method: 'POST',
-      body: JSON.stringify({ status }),
-    });
+  async requestRegularization(payload: {
+    attendanceDate: string;
+    shiftType: string;
+    requestedSignInTime: string;
+    requestedSignOutTime: string;
+    reason: string;
+    attendanceRecordId?: string | null;
+  }): Promise<{ success: boolean; message: string }> {
+    return this.submitRegularization(payload);
   },
 
-  async getDayWiseAttendance(params?: {
-    month?: string;
-    employeeIds?: string;
-  }): Promise<{
-    success: boolean;
-    month: string;
-    breakdowns: Array<{
-      employeeId: string;
-      employeeName: string;
-      department: string;
-      designation: string;
-      month: string;
-      dayWiseBreakdown: DayWiseAttendanceEntry[];
-      totals: {
-        presentDays: number;
-        absentDays: number;
-        paidLeaves: number;
-        unpaidLeaves: number;
-        holidays: number;
-        holidaysWorked: number;
-        lateMarks: number;
-        halfDays: number;
-        extraNights: number;
-        totalPayableDays: number;
+  async uploadFile(file: File, purpose: string = 'general'): Promise<{ success: boolean; file: { url: string; fileName: string; fileType: string; fileSize: number; id: string } }> {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    return {
+      success: true,
+      file: {
+        url: dataUrl,
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        id: `att_${Date.now()}`,
+      },
+    };
+  },
+
+  async fetchAuthenticatedBlob(url: string): Promise<{ objectUrl: string; fileName?: string; contentType?: string }> {
+    if (url.startsWith('data:')) {
+      const mime = url.match(/^data:(.*?);base64/)?.[1] || 'application/octet-stream';
+      const byteCharacters = atob(url.split(',')[1]);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mime });
+      return {
+        objectUrl: URL.createObjectURL(blob),
+        contentType: mime,
       };
-    }>;
-  }> {
-    const query = new URLSearchParams();
-    if (params?.month) query.set('month', params.month);
-    if (params?.employeeIds) query.set('employeeIds', params.employeeIds);
-    return request(`/api/v1/admin/attendance/day-wise?${query.toString()}`);
+    }
+    const token = await getIdTokenSafe();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    return {
+      objectUrl: URL.createObjectURL(blob),
+      contentType: blob.type,
+    };
+  },
+
+  async downloadFile(url: string, filename: string): Promise<void> {
+    const { objectUrl } = await this.fetchAuthenticatedBlob(url);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+    }, 200);
+  },
+
+  async getAuthenticatedFileUrl(url: string): Promise<string> {
+    if (url.startsWith('data:')) return url;
+    return url;
   },
 };
-

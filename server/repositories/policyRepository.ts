@@ -5,11 +5,10 @@ import {
   markFirestoreUnavailable,
   isFirestorePermissionOrNetworkError,
 } from '../lib/storageEngine';
-import { AttendanceRules, Holiday } from '../../src/types';
+import { AttendanceRules } from '../../src/types';
 
 const SETTINGS_COLLECTION = 'system_settings';
 const RULES_DOC_ID = 'attendance_rules';
-const HOLIDAYS_COLLECTION = 'holidays';
 
 export const defaultAttendanceRules: AttendanceRules = {
   dayShift: {
@@ -80,34 +79,7 @@ export const policyRepository = {
     return merged;
   },
 
-  async getHolidays(): Promise<Holiday[]> {
-    if (isRemoteFirestoreActive()) {
-      try {
-        const snap = await adminDb.collection(HOLIDAYS_COLLECTION).get();
-        const list = snap.docs.map((doc) => ({ ...doc.data(), id: doc.id } as Holiday));
-        for (const h of list) storageEngine.setDoc(HOLIDAYS_COLLECTION, h.id, h);
-        return list;
-      } catch (err: any) {
-        if (isFirestorePermissionOrNetworkError(err)) {
-          markFirestoreUnavailable(err);
-        }
-      }
-    }
-
-    return storageEngine.getAllDocs<Holiday>(HOLIDAYS_COLLECTION);
-  },
-
-  async setHoliday(holiday: Holiday): Promise<void> {
-    storageEngine.setDoc(HOLIDAYS_COLLECTION, holiday.id, holiday);
-
-    if (isRemoteFirestoreActive()) {
-      try {
-        await adminDb.collection(HOLIDAYS_COLLECTION).doc(holiday.id).set(holiday);
-      } catch (err: any) {
-        if (isFirestorePermissionOrNetworkError(err)) {
-          markFirestoreUnavailable(err);
-        }
-      }
-    }
+  async saveRules(rules: AttendanceRules): Promise<AttendanceRules> {
+    return this.updateRules(rules, rules.updatedBy || 'admin');
   },
 };

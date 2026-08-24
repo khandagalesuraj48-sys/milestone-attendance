@@ -342,4 +342,57 @@ export const attendanceService = {
       message: `Signed Out successfully. Total duration: ${hours} hours (${workingMinutes} minutes). Attendance marked as ${status}.`,
     };
   },
+
+  /**
+   * Get real-time attendance status for employee
+   */
+  async getCurrentStatus(employeeId: string): Promise<{
+    activeSession: AttendanceRecord | null;
+    todayRecords: AttendanceRecord[];
+    attendanceState: 'NOT_SIGNED_IN' | 'SIGNED_IN' | 'SIGNED_OUT' | 'AUTO_SIGNED_OUT';
+    canPunchIn: boolean;
+    canPunchOut: boolean;
+    currentDate: string;
+    rules: any;
+    employee: any;
+  }> {
+    const cleanId = employeeId.trim().toUpperCase();
+    const employee = await employeesRepository.getById(cleanId);
+    const rules = await policyRepository.getRules();
+    const istParts = shiftService.getISTDateParts();
+    const todayStr = istParts.dateStr;
+
+    const activeSession = await attendanceRepository.getActiveSession(cleanId);
+    const todayRecords = await attendanceRepository.getByEmployeeAndDate(cleanId, todayStr);
+
+    let attendanceState: 'NOT_SIGNED_IN' | 'SIGNED_IN' | 'SIGNED_OUT' | 'AUTO_SIGNED_OUT' = 'NOT_SIGNED_IN';
+    let canPunchIn = true;
+    let canPunchOut = false;
+
+    if (activeSession) {
+      attendanceState = 'SIGNED_IN';
+      canPunchIn = false;
+      canPunchOut = true;
+    } else if (todayRecords.length > 0) {
+      const lastRecord = todayRecords[0];
+      if (lastRecord.attendanceState === 'AUTO_SIGNED_OUT') {
+        attendanceState = 'AUTO_SIGNED_OUT';
+      } else {
+        attendanceState = 'SIGNED_OUT';
+      }
+      canPunchIn = true;
+      canPunchOut = false;
+    }
+
+    return {
+      activeSession,
+      todayRecords,
+      attendanceState,
+      canPunchIn,
+      canPunchOut,
+      currentDate: todayStr,
+      rules,
+      employee,
+    };
+  },
 };

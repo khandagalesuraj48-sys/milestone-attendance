@@ -1,6 +1,6 @@
 {
   "name": "Milestone Attendance System",
-  "description": "Enterprise employee attendance, master register finalization, and payroll engine platform with server-authoritative geofencing, dual shift tracking, and admin control center.",
+  "description": "Enterprise employee attendance and muster register platform with server-authoritative geofencing, dual shift tracking, and admin command center.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

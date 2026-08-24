@@ -1,5 +1,5 @@
 // Milestone Consultancy Employee Attendance & Workforce Management System
-// Shared TypeScript Types & Interfaces — Final V1 Multi-Site Implementation Baseline
+// Shared TypeScript Types & Interfaces — Clean Production Baseline
 
 export type UserRole = 'admin' | 'employee';
 export type AccountStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
@@ -15,8 +15,7 @@ export type AttendanceStatus =
   | 'PRESENT_HALF_DAY'
   | 'ABSENT'
   | 'LEAVE'
-  | 'WEEKLY_OFF'
-  | 'HOLIDAY';
+  | 'WEEKLY_OFF';
 
 export type SignOutType = 'MANUAL' | 'AUTO_SIGNED_OUT';
 export type SignOutReason = 'NORMAL' | 'NORMAL_USER_PUNCH' | 'EMPLOYEE_FORGOT_SIGN_OUT' | 'ADMIN_OVERRIDE' | string;
@@ -68,51 +67,6 @@ export type LocationSite = Location & {
   name?: string;
 };
 
-export interface BankDetails {
-  bankName?: string;
-  accountNumber?: string;
-  ifscCode?: string;
-  panNumber?: string;
-  uanNumber?: string;
-}
-
-export interface SalaryStructure {
-  monthlyGross: number;
-  monthlyGrossCtc?: number; // Alias for monthlyGross
-  basicSalary: number;
-  hra: number;
-  specialAllowance: number;
-  conveyanceAllowance?: number;
-  medicalAllowance?: number;
-  otherAllowances?: number;
-  
-  // Deductions Config
-  pfApplicable?: boolean;
-  pfDeductionType?: 'PERCENTAGE' | 'FIXED' | 'EXEMPT';
-  pfPercentage?: number;
-  pfRatePercent?: number; // default 12
-  pfFixedAmount?: number;
-  ptApplicable?: boolean; // Professional Tax
-  ptDeductionEnabled?: boolean;
-  ptState?: string;
-  ptStateSlab?: string;
-  ptFixedAmount?: number;
-  tdsMonthly?: number;
-  tdsMonthlyAmount?: number;
-  otherDeductions?: number;
-  
-  // Bank & Tax Details
-  effectiveFrom?: string;
-  bankDetails?: BankDetails;
-  bankName?: string;
-  accountNumber?: string;
-  ifscCode?: string;
-  panNumber?: string;
-  uanNumber?: string;
-  pfNumber?: string;
-  paymentMode?: 'BANK_TRANSFER' | 'CHEQUE' | 'CASH';
-}
-
 export interface Employee {
   id?: string;
   uid?: string;
@@ -127,7 +81,6 @@ export interface Employee {
   dateOfBirth?: string;
   reportingManagerId?: string | null;
   reportingManagerName?: string | null;
-  salaryStructure?: SalaryStructure;
   photoUrl?: string;
   assignedSiteIds: string[]; // 1..N authorized Sites
   assignedLocationIds?: string[];
@@ -135,87 +88,47 @@ export interface Employee {
   accountStatus: AccountStatus;
   boundHardwareSignature: string | null;
   activeDeviceId: string | null;
+  salaryStructure?: SalaryStructure;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface TeamAnnouncement {
+export interface BankDetails {
+  bankName: string;
+  accountNumber: string;
+  ifscCode: string;
+  panNumber: string;
+  uanNumber: string;
+  epfNumber?: string;
+}
+
+export interface SalaryStructure {
+  monthlyGross: number;
+  monthlyGrossCtc: number;
+  basicSalary: number;
+  hra: number;
+  specialAllowance: number;
+  conveyanceAllowance: number;
+  medicalAllowance: number;
+  otherAllowances: number;
+  pfDeductionType: 'EXEMPT' | 'FIXED' | 'STANDARD_12_PERCENT' | string;
+  pfPercentage: number;
+  pfFixedAmount: number;
+  ptDeductionEnabled: boolean;
+  ptStateSlab: string;
+  tdsMonthlyAmount: number;
+  effectiveFrom: string;
+  bankDetails: BankDetails;
+}
+
+export interface Holiday {
   id: string;
-  type: 'NEW_MEMBER' | 'ANNIVERSARY' | 'COMPANY';
-  title: string;
-  employeeName?: string;
-  designation?: string;
-  siteName?: string;
-  photoUrl?: string;
-  description?: string;
-  date?: string;
-  milestoneMonths?: number;
-}
-
-export interface UpcomingBirthday {
-  employeeId: string;
-  employeeName: string;
-  designation: string;
-  siteName: string;
-  birthdayDate: string;
-  photoUrl?: string;
-}
-
-export interface WorkAnniversaryItem {
-  employeeId: string;
-  employeeName: string;
-  designation: string;
-  siteName: string;
-  monthsCompleted: number;
-  photoUrl?: string;
-  joiningDate: string;
-}
-
-export interface DeviceHistoryLog {
-  id: string;
-  action: 'BOUND' | 'UNBOUND' | 'RESET';
-  timestamp: string;
-  actorName: string;
-  actorRole: string;
-  deviceModel?: string;
-  userAgent?: string;
-  ipAddress?: string;
-  reason?: string;
-}
-
-export interface DeviceBinding {
-  id: string;
-  deviceId: string;
-  employeeId: string;
-  deviceSignature: string;
-  deviceModel?: string;
-  platform?: string;
-  browserFingerprint?: string;
-  status: 'APPROVED' | 'ACTIVE' | 'REVOKED';
-  boundAt?: string;
-  registeredAt?: string;
-  firstUsedAt?: string;
-  lastUsedAt?: string;
-  revokedAt?: string | null;
-  revokedByAdminId?: string | null;
-  revocationReason?: string | null;
-  userAgent?: string;
-  ipAddress?: string;
+  date: string;
+  name: string;
+  type?: 'NATIONAL' | 'STATE' | 'COMPANY' | string;
+  isOptional?: boolean;
   createdAt?: string;
   updatedAt?: string;
-}
-
-export interface DeviceRecord {
-  id: string;
-  employeeId: string;
-  installationKey: string;
-  status: 'ACTIVE' | 'REVOKED';
-  registeredAt: string;
-  revokedAt: string | null;
-  revokedByAdminId: string | null;
-  revocationReason: string | null;
-  userAgent: string;
-  ipAddress: string;
 }
 
 export interface Coordinates {
@@ -234,13 +147,13 @@ export interface GPSCoordinatesWithDistance {
 
 export interface AttendanceRecord {
   recordId: string;
-  id?: string; // compatibility alias
+  id?: string;
   employeeId: string;
   employeeName?: string;
   employeeNameSnapshot?: string;
   department?: string;
-  businessDate: string; // YYYY-MM-DD in IST (authoritative)
-  attendanceDate?: string; // alias
+  businessDate: string; // YYYY-MM-DD in IST
+  attendanceDate?: string;
 
   // Immutable Site & Location Snapshots (Fixed permanently at Sign In)
   siteId: string;
@@ -259,7 +172,7 @@ export interface AttendanceRecord {
   isLate: boolean;
   lateMinutes?: number;
   lateMarkIndex?: number;
-  lateMarkIndexInMonth?: number; // 1-based sequential counter
+  lateMarkIndexInMonth?: number;
 
   // Sign-Out Metrics
   signOutTime: string | null;
@@ -269,7 +182,7 @@ export interface AttendanceRecord {
 
   // Status Lifecycles
   sessionStatus: SessionStatus;
-  attendanceState: AttendanceState; // compatibility
+  attendanceState: AttendanceState;
   attendanceStatus: AttendanceStatus;
   signOutType?: SignOutType | null;
   autoSignOutReason?: string | null;
@@ -326,28 +239,6 @@ export interface AttendanceRules {
   updatedAt: string;
 }
 
-export interface WeeklyOffSchedule {
-  id: string;
-  name: string;
-  daysOfWeek: number[]; // 0 = Sunday, 6 = Saturday
-  effectiveFrom: string;
-  effectiveTo: string | null;
-  isActive: boolean;
-  createdAt: string;
-}
-
-export interface Holiday {
-  id: string;
-  name: string;
-  date: string; // YYYY-MM-DD
-  isMandatory: boolean;
-  year: number;
-  isActive?: boolean;
-  description?: string;
-  createdAt: string;
-  updatedAt?: string;
-}
-
 export interface LeaveRecord {
   id: string;
   employeeId: string;
@@ -383,10 +274,10 @@ export interface LeaveBalance {
   paidUsed: number;
   paidRemaining: number;
   approvedUnpaid: number;
-  currentBalance?: number; // alias for paidRemaining
-  usedLeaves?: number; // alias for paidUsed
-  unpaidLeaves?: number; // alias for approvedUnpaid
-  creditedMonths: string[]; // e.g. ["2026-01", "2026-02"]
+  currentBalance?: number;
+  usedLeaves?: number;
+  unpaidLeaves?: number;
+  creditedMonths: string[];
   ledger?: LeaveLedgerEntry[];
   updatedAt: string;
 }
@@ -396,15 +287,15 @@ export interface LeaveLedgerEntry {
   employeeId: string;
   employeeName?: string;
   type?: 'OPENING' | 'MONTHLY_ENTITLEMENT' | 'LEAVE_DEBIT' | 'LEAVE_REVERSAL' | 'ADMIN_ADJUSTMENT';
-  entryType?: string; // alias for display
-  amount?: number; // positive or negative
-  changeAmount?: number; // alias for amount
+  entryType?: string;
+  amount?: number;
+  changeAmount?: number;
   balanceAfter: number;
   month?: string; // YYYY-MM
-  date?: string; // YYYY-MM-DD or display
+  date?: string; // YYYY-MM-DD
   leaveId?: string;
   note?: string;
-  description?: string; // alias for note
+  description?: string;
   createdAt: string;
 }
 
@@ -435,7 +326,7 @@ export interface AppNotification {
   type: 'ATTENDANCE_ERROR' | 'REGULARIZATION' | 'LEAVE_STATUS' | 'ANNOUNCEMENT' | 'INFO' | 'SECURITY_ALERT';
   title: string;
   message: string;
-  date: string; // YYYY-MM-DD or ISO
+  date: string;
   read: boolean;
   actionType?: 'REGULARIZE_ATTENDANCE' | 'VIEW_LEAVE' | 'VIEW_ATTENDANCE' | 'OPEN_DRAWER' | 'VIEW_PROFILE';
   actionPayload?: {
@@ -490,14 +381,12 @@ export interface AuditLog {
   timestamp: string;
 }
 
-export type PayrollStatus = 'DRAFT' | 'FINALIZED' | 'PUBLISHED';
-
 export type MasterRegisterStatus = 'DRAFT' | 'SUBMITTED' | 'FINALIZED' | 'REOPENED';
 
 export interface DayWiseAttendanceEntry {
   date: string; // YYYY-MM-DD
   dayName: string; // Mon, Tue, etc.
-  status: AttendanceStatus | 'PRESENT' | 'HOLIDAY_WORKED' | 'REST_DAY';
+  status: AttendanceStatus | 'PRESENT' | 'REST_DAY';
   shiftType?: ShiftType;
   isExtraShift?: boolean;
   signInTime?: string | null;
@@ -509,7 +398,7 @@ export interface DayWiseAttendanceEntry {
 }
 
 export interface MasterRegisterEntry {
-  id: string; // unique ID e.g. mr_2026-08_EMP001
+  id: string;
   month: string; // YYYY-MM
   employeeId: string;
   employeeName: string;
@@ -522,7 +411,6 @@ export interface MasterRegisterEntry {
   totalDaysInMonth: number;
   totalWorkingDays: number;
   
-  // Attendance metrics (Actual vs Final)
   actualPresentDays: number;
   actualAbsentDays: number;
   adminFinalPresentDays: number;
@@ -531,8 +419,6 @@ export interface MasterRegisterEntry {
   paidLeaves: number;
   unpaidLeaves: number;
   leaveBalance: number;
-  holidays: number;
-  holidaysWorked: number;
   weeklyOffs: number;
   lateMarksCount: number;
   halfDaysCount: number;
@@ -563,115 +449,6 @@ export interface MasterRegisterSummary {
   entries: MasterRegisterEntry[];
   createdAt: string;
   updatedAt: string;
-}
-
-export interface SalaryStructureVersion extends SalaryStructure {
-  versionId: string;
-  employeeId: string;
-  effectiveFrom: string; // YYYY-MM-DD
-  effectiveTo?: string | null; // YYYY-MM-DD or null for active
-  createdByAdminId: string;
-  createdAt: string;
-}
-
-export interface PayrollItem {
-  id: string;
-  payrollRunId: string;
-  employeeId: string;
-  employeeName: string;
-  department: string;
-  designation: string;
-  joiningDate?: string;
-  bankName?: string;
-  accountNumber?: string;
-  ifscCode?: string;
-  panNumber?: string;
-  uanNumber?: string;
-  
-  month: string; // YYYY-MM
-  totalDaysInMonth: number;
-  workingDaysInMonth: number;
-  
-  // Attendance Breakdown
-  presentFullDays: number;
-  presentHalfDays: number;
-  paidLeaves: number;
-  unpaidLeaves: number;
-  weeklyOffs: number;
-  paidHolidays: number;
-  absentDays: number;
-  lateDays: number;
-  lateDeductionDays: number;
-  extraNightShifts: number;
-  extraNightAllowanceRate?: number;
-  
-  paidDays: number;
-  lopDays: number;
-  
-  // Fixed Structure
-  grossSalary: number;
-  basicSalary: number;
-  hra: number;
-  specialAllowance: number;
-  conveyanceAllowance: number;
-  medicalAllowance: number;
-  otherAllowances: number;
-  
-  // Earned Prorated Components
-  earnedBasic: number;
-  earnedHra: number;
-  earnedSpecialAllowance: number;
-  earnedConveyance: number;
-  earnedMedical: number;
-  earnedOtherAllowances: number;
-  extraNightBonus: number;
-  incentivesBonus: number;
-  totalGrossEarned: number;
-  
-  // Deductions
-  pfDeduction: number;
-  ptDeduction: number;
-  tdsDeduction: number;
-  otherDeductions: number;
-  totalDeductions: number;
-  
-  // Net
-  netSalary: number;
-  netSalaryInWords: string;
-  
-  paymentStatus: 'UNPAID' | 'PAID' | 'ON_HOLD';
-  paidOn?: string;
-  remarks?: string;
-  publishedAt?: string;
-  publishedBy?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface PayrollRun {
-  id: string;
-  month: string; // YYYY-MM
-  status: PayrollStatus;
-  totalEmployees: number;
-  totalGrossAmount: number;
-  totalDeductionsAmount: number;
-  totalNetAmount: number;
-  generatedByAdminId: string;
-  generatedByAdminName: string;
-  finalizedAt?: string | null;
-  finalizedBy?: string | null;
-  publishedAt?: string | null;
-  publishedBy?: string | null;
-  items?: PayrollItem[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SalarySlip extends PayrollItem {
-  companyName: string;
-  companyAddress: string;
-  companyLogoUrl?: string;
-  slipNumber: string;
 }
 
 export interface ProjectShiftParams {
@@ -706,4 +483,37 @@ export interface DeviceResetRequest {
   updatedAt: string;
 }
 
+export interface DeviceBinding {
+  id: string;
+  deviceId: string;
+  employeeId: string;
+  deviceSignature: string;
+  deviceModel?: string;
+  platform?: string;
+  browserFingerprint?: string;
+  status: 'APPROVED' | 'ACTIVE' | 'REVOKED';
+  boundAt?: string;
+  registeredAt?: string;
+  firstUsedAt?: string;
+  lastUsedAt?: string;
+  revokedAt?: string | null;
+  revokedByAdminId?: string | null;
+  revocationReason?: string | null;
+  userAgent?: string;
+  ipAddress?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
+export interface DeviceRecord {
+  id: string;
+  employeeId: string;
+  installationKey: string;
+  status: 'ACTIVE' | 'REVOKED';
+  registeredAt: string;
+  revokedAt: string | null;
+  revokedByAdminId: string | null;
+  revocationReason: string | null;
+  userAgent: string;
+  ipAddress: string;
+}

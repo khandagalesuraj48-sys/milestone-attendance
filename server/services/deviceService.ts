@@ -139,4 +139,13 @@ export const deviceService = {
       ipAddress,
     });
   },
+
+  async resetDeviceBinding(
+    employeeId: string,
+    adminId: string,
+    adminName: string = 'Admin',
+    ipAddress: string = '127.0.0.1'
+  ): Promise<void> {
+    return this.resetDevice(employeeId, adminId, adminName, ipAddress);
+  },
 };

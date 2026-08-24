@@ -5,7 +5,6 @@ import {
   Site,
   LocationSite,
   AttendanceRules,
-  Holiday,
 } from '../../src/types';
 
 // StorageEngine is now purely an in-memory cache layer for ephemeral read optimization.
@@ -41,7 +40,7 @@ export function isFirestorePermissionOrNetworkError(err: any): boolean {
 
 export function markFirestoreUnavailable(err?: any) {
   isFirestoreAvailable = false;
-  console.error('[StorageEngine] Firestore error encountered:', err?.message || err);
+  console.warn('[StorageEngine] Firestore connectivity unavailable; transitioning to memory cache fallback:', err?.message || err);
 }
 
 export function markFirestoreAvailable() {

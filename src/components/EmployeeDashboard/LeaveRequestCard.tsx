@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../lib/api';
-import { LeaveRecord, LeaveBalance, AttendanceRegularizationRequest, Holiday } from '../../types';
+import { LeaveRecord, LeaveBalance, AttendanceRegularizationRequest } from '../../types';
 import { SupportingEvidenceModal } from '../common/SupportingEvidenceModal';
 import {
   Calendar,
@@ -13,7 +13,6 @@ import {
   Paperclip,
   Upload,
   Layers,
-  Sparkles,
   ShieldCheck,
   Eye,
   X,
@@ -27,7 +26,6 @@ export const LeaveRequestCard: React.FC = () => {
   const [leaves, setLeaves] = useState<LeaveRecord[]>([]);
   const [regularizations, setRegularizations] = useState<AttendanceRegularizationRequest[]>([]);
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
-  const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [loading, setLoading] = useState(false);
 
   // Leave Form State
@@ -62,16 +60,14 @@ export const LeaveRequestCard: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [leavesRes, regRes, balRes, holRes] = await Promise.all([
+      const [leavesRes, regRes, balRes] = await Promise.all([
         api.getMyLeaves(),
         api.getMyRegularizations(),
         api.getMyLeaveBalance(),
-        api.getHolidays(new Date().getFullYear()),
       ]);
       setLeaves(leavesRes.leaves || []);
       setRegularizations(regRes.requests || []);
       setBalance(balRes.balance || null);
-      setHolidays(holRes.holidays || []);
     } catch (err) {
       console.error('Failed to load leave data', err);
     } finally {
@@ -198,12 +194,6 @@ export const LeaveRequestCard: React.FC = () => {
       setSubmittingReg(false);
     }
   };
-
-  // Check overlapping holidays for leave range
-  const overlappingHolidays = holidays.filter((h) => {
-    if (!startDate || !endDate) return false;
-    return h.date >= startDate && h.date <= endDate;
-  });
 
   return (
     <div id="leave-manager-module" className="space-y-4">
@@ -368,23 +358,6 @@ export const LeaveRequestCard: React.FC = () => {
                     />
                   </div>
                 </div>
-
-                {/* Overlapping Holidays Notice */}
-                {overlappingHolidays.length > 0 && (
-                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-start space-x-2">
-                    <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold block">Company Holiday in Range:</span>
-                      <ul className="list-disc list-inside mt-0.5 space-y-0.5">
-                        {overlappingHolidays.map((h) => (
-                          <li key={h.id}>
-                            <strong>{h.date}:</strong> {h.name} (Exempt from paid leave deduction)
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                )}
 
                 <div>
                   <label className="block text-slate-700 font-bold mb-1">Reason for Absence</label>

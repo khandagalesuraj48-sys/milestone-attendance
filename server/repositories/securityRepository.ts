@@ -59,4 +59,8 @@ export const securityRepository = {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, limitCount);
   },
+
+  async getRecent(limitCount: number = 10): Promise<SecurityEvent[]> {
+    return this.getAll(limitCount);
+  },
 };

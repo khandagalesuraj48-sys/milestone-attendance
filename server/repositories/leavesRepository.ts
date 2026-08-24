@@ -77,6 +77,11 @@ export const leavesRepository = {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   },
 
+  async getPending(): Promise<LeaveRecord[]> {
+    const all = await this.getAll();
+    return all.filter((l) => l.status === 'PENDING');
+  },
+
   async create(leave: LeaveRecord): Promise<LeaveRecord> {
     const docId = leave.id || `leave_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const docData: LeaveRecord = {

@@ -108,4 +108,19 @@ export const sitesRepository = {
       }
     }
   },
+
+  async delete(siteId: string): Promise<void> {
+    const clean = siteId.trim();
+    storageEngine.deleteDoc(COLLECTION, clean);
+
+    if (isRemoteFirestoreActive()) {
+      try {
+        await adminDb.collection(COLLECTION).doc(clean).delete();
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+  },
 };

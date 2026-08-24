@@ -7,13 +7,10 @@ import { ForcePasswordChangeScreen } from './components/ForcePasswordChangeScree
 
 // Employee Components
 import { PunchCard } from './components/EmployeeDashboard/PunchCard';
-import { AutoSignOutNotice } from './components/EmployeeDashboard/AutoSignOutNotice';
 import { TodayShiftList } from './components/EmployeeDashboard/TodayShiftList';
 import { MonthlyRegister } from './components/EmployeeDashboard/MonthlyRegister';
 import { LeaveRequestCard } from './components/EmployeeDashboard/LeaveRequestCard';
-import { MySalarySlips } from './components/EmployeeDashboard/MySalarySlips';
 import { MyProfile } from './components/EmployeeDashboard/MyProfile';
-import { TeamFeedWidget } from './components/EmployeeDashboard/TeamFeedWidget';
 import { EmployeeMenuDrawer } from './components/EmployeeDashboard/EmployeeMenuDrawer';
 import { NotificationDrawer } from './components/EmployeeDashboard/NotificationDrawer';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
@@ -21,13 +18,11 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 // Admin Components
 import { OperationsBoard } from './components/AdminDashboard/OperationsBoard';
 import { LiveAttendanceRegister } from './components/AdminDashboard/LiveAttendanceRegister';
-import { PayrollEngine } from './components/AdminDashboard/PayrollEngine';
 import { EmployeeDirectory } from './components/AdminDashboard/EmployeeDirectory';
 import { CorrectionStudioModal } from './components/AdminDashboard/CorrectionStudioModal';
 import { SiteManager } from './components/AdminDashboard/SiteManager';
 import { AccessManager } from './components/AdminDashboard/AccessManager';
 import { LeaveReviewCenter } from './components/AdminDashboard/LeaveReviewCenter';
-import { HolidayManager } from './components/AdminDashboard/HolidayManager';
 import { SecurityCenter } from './components/AdminDashboard/SecurityCenter';
 import { PolicyMaster } from './components/AdminDashboard/PolicyMaster';
 import { AuditVault } from './components/AdminDashboard/AuditVault';
@@ -47,7 +42,8 @@ import {
   ChevronRight,
   Activity,
   Sliders,
-  Banknote,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function App() {
@@ -58,13 +54,13 @@ export default function App() {
   const [activeSession, setActiveSession] = useState<AttendanceRecord | null>(null);
   const [todayShifts, setTodayShifts] = useState<AttendanceRecord[]>([]);
   const [autoSignOutNotice, setAutoSignOutNotice] = useState<any>(null);
-  const [empActiveTab, setEmpActiveTab] = useState<'SHIFT' | 'HISTORY' | 'SLIPS' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS'>('SHIFT');
+  const [empActiveTab, setEmpActiveTab] = useState<'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE'>('SHIFT');
   const [isEmployeeMenuOpen, setIsEmployeeMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   // Admin State
   const [adminActiveTab, setAdminActiveTab] = useState<
-    'DASHBOARD' | 'REGISTER' | 'PAYROLL' | 'EMPLOYEES' | 'SITES' | 'ACCESS' | 'LEAVES' | 'HOLIDAYS' | 'SECURITY' | 'POLICY' | 'AUDIT' | 'REPORTS'
+    'DASHBOARD' | 'REGISTER' | 'EMPLOYEES' | 'SITES' | 'ACCESS' | 'LEAVES' | 'SECURITY' | 'POLICY' | 'AUDIT' | 'REPORTS'
   >('DASHBOARD');
   const [adminSummary, setAdminSummary] = useState<Record<string, number>>({});
   const [adminTodayDate, setAdminTodayDate] = useState<string>('');
@@ -73,27 +69,29 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
+  // Reset System State Modal
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetError, setResetError] = useState('');
+
   // Common Data
   const [locations, setLocations] = useState<LocationSite[]>([]);
 
   // Hash-based client-side routing & history management
-  const getEmpTabFromHash = (hash: string): 'SHIFT' | 'HISTORY' | 'SLIPS' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS' => {
+  const getEmpTabFromHash = (hash: string): 'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE' => {
     const clean = hash.replace(/^#\/?/, '').toLowerCase();
     if (clean === 'register' || clean === 'history') return 'HISTORY';
-    if (clean === 'slips' || clean === 'salary') return 'SLIPS';
     if (clean === 'leave' || clean === 'leaves') return 'LEAVE';
     if (clean === 'profile') return 'PROFILE';
-    if (clean === 'team' || clean === 'highlights') return 'TEAM_HIGHLIGHTS';
     return 'SHIFT';
   };
 
   const getEmpHashFromTab = (tab: string): string => {
     switch (tab) {
       case 'HISTORY': return '#/register';
-      case 'SLIPS': return '#/slips';
       case 'LEAVE': return '#/leave';
       case 'PROFILE': return '#/profile';
-      case 'TEAM_HIGHLIGHTS': return '#/team';
       case 'SHIFT':
       default: return '#/shift';
     }
@@ -104,12 +102,10 @@ export default function App() {
     const map: Record<string, string> = {
       dashboard: 'DASHBOARD',
       register: 'REGISTER',
-      payroll: 'PAYROLL',
       employees: 'EMPLOYEES',
       sites: 'SITES',
       access: 'ACCESS',
       leaves: 'LEAVES',
-      holidays: 'HOLIDAYS',
       security: 'SECURITY',
       policy: 'POLICY',
       audit: 'AUDIT',
@@ -122,7 +118,7 @@ export default function App() {
     return `#/admin/${tab.toLowerCase()}`;
   };
 
-  const handleSelectEmpTab = (tab: 'SHIFT' | 'HISTORY' | 'SLIPS' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS', pushHistory = true) => {
+  const handleSelectEmpTab = (tab: 'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE', pushHistory = true) => {
     setEmpActiveTab(tab);
     const targetHash = getEmpHashFromTab(tab);
     if (pushHistory && window.location.hash !== targetHash) {
@@ -138,7 +134,7 @@ export default function App() {
     }
   };
 
-  // Listen to popstate and hashchange for clean in-app back/forward navigation without page reload
+  // Listen to popstate and hashchange
   useEffect(() => {
     const handlePopState = () => {
       const hash = window.location.hash;
@@ -221,8 +217,7 @@ export default function App() {
     try {
       const res = await api.getMyToday();
       setActiveSession(res.activeSession);
-      setTodayShifts(res.shifts || []);
-      setAutoSignOutNotice(res.recentAutoSignOutNotice);
+      setTodayShifts(res.todayRecord ? [res.todayRecord] : []);
     } catch (err) {
       console.error('Failed to fetch employee attendance', err);
     }
@@ -233,8 +228,8 @@ export default function App() {
     if (!currentUser || currentUser.mustChangePassword || currentUser.role !== 'admin') return;
     try {
       const res = await api.getAdminOverview();
-      setAdminSummary(res.summary || {});
-      setAdminTodayDate(res.todayDate || '');
+      setAdminSummary(res.stats || {});
+      setAdminTodayDate(res.date || '');
     } catch (err) {
       console.error('Failed to load admin overview', err);
     }
@@ -255,6 +250,24 @@ export default function App() {
       await api.logout();
     } catch {}
     setCurrentUser(null);
+  };
+
+  const handleSystemPurge = async () => {
+    if (resetConfirmText.trim() !== 'RESET ALL DATA') {
+      setResetError('Please type exact confirmation text: RESET ALL DATA');
+      return;
+    }
+
+    try {
+      setIsResetting(true);
+      setResetError('');
+      await api.purgeAllData();
+      await api.logout();
+      window.location.reload();
+    } catch (err: any) {
+      setResetError(err.message || 'Failed to wipe system data.');
+      setIsResetting(false);
+    }
   };
 
   if (authLoading) {
@@ -298,7 +311,6 @@ export default function App() {
       items: [
         { id: 'DASHBOARD', label: 'Operations Board', icon: Clock, badge: 'LIVE' },
         { id: 'REGISTER', label: 'Live Muster Register', icon: FileSpreadsheet },
-        { id: 'PAYROLL', label: 'Payroll & Salary Slips', icon: Banknote, badge: 'PRO' },
         { id: 'EMPLOYEES', label: 'Staff Workforce', icon: Users },
         { id: 'SITES', label: 'Projects & Locations', icon: MapPin },
         { id: 'ACCESS', label: 'Site Access Manager', icon: Layers },
@@ -308,13 +320,12 @@ export default function App() {
       group: 'LEAVE & REGULARIZATION',
       items: [
         { id: 'LEAVES', label: 'Leave & Regularization', icon: FileText },
-        { id: 'HOLIDAYS', label: 'Company Holidays', icon: Calendar },
       ],
     },
     {
       group: 'INTELLIGENCE & REPORTS',
       items: [
-        { id: 'REPORTS', label: 'Monthly Reports', icon: BarChart3 },
+        { id: 'REPORTS', label: 'Monthly Muster Reports', icon: BarChart3 },
       ],
     },
     {
@@ -334,7 +345,7 @@ export default function App() {
         user={currentUser}
         onLogout={handleLogout}
         onProfileClick={() => currentUser.role === 'employee' && handleSelectEmpTab('PROFILE')}
-        onSelectTab={(tab) => handleSelectEmpTab(tab)}
+        onSelectTab={(tab) => handleSelectEmpTab(tab as any)}
         currentTab={empActiveTab}
         onMobileMenuToggle={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMobileMenuOpen={isMobileMenuOpen}
@@ -353,7 +364,6 @@ export default function App() {
             currentTab={empActiveTab}
             onSelectTab={(tab) => handleSelectEmpTab(tab)}
             onLogout={handleLogout}
-            siteName="RCL • WALSHIND"
           />
           <NotificationDrawer
             isOpen={isNotificationsOpen}
@@ -420,7 +430,7 @@ export default function App() {
                               handleSelectAdminTab(item.id as any);
                               setIsMobileMenuOpen(false);
                             }}
-                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition group ${
+                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition group cursor-pointer ${
                               isActive
                                 ? 'bg-slate-900 text-white shadow-xs'
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
@@ -454,14 +464,23 @@ export default function App() {
               </nav>
 
               {/* Sidebar Footer Info */}
-              <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+              <div className="p-3 border-t border-slate-100 bg-slate-50/50 space-y-2">
                 <div className="px-2 py-2 rounded-xl bg-white border border-slate-200/80 text-[11px] text-slate-600 flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
                     <span className="font-semibold text-slate-800">Engine Active</span>
                   </div>
-                  <span className="font-mono text-[10px] text-slate-400">v2.4 IST</span>
+                  <span className="font-mono text-[10px] text-slate-400">Zero Legacy Data</span>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsResetModalOpen(true)}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 text-[11px] font-bold flex items-center justify-center space-x-1.5 transition cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Fresh System Reset</span>
+                </button>
               </div>
             </aside>
 
@@ -491,8 +510,6 @@ export default function App() {
                   />
                 )}
 
-                {adminActiveTab === 'PAYROLL' && <PayrollEngine />}
-
                 {adminActiveTab === 'EMPLOYEES' && <EmployeeDirectory locations={locations} />}
 
                 {adminActiveTab === 'SITES' && (
@@ -505,10 +522,6 @@ export default function App() {
 
                 {adminActiveTab === 'LEAVES' && (
                   <LeaveReviewCenter />
-                )}
-
-                {adminActiveTab === 'HOLIDAYS' && (
-                  <HolidayManager />
                 )}
 
                 {adminActiveTab === 'SECURITY' && <SecurityCenter />}
@@ -529,6 +542,75 @@ export default function App() {
                     setRefreshTrigger((t) => t + 1);
                   }}
                 />
+              )}
+
+              {/* System Reset Confirmation Modal */}
+              {isResetModalOpen && (
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-2xl space-y-4">
+                    <div className="flex items-center space-x-3 text-rose-600">
+                      <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200">
+                        <AlertTriangle className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900">Complete Fresh System Reset</h3>
+                        <p className="text-xs text-rose-600 font-medium">Irreversible Production Action</p>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      This will permanently purge <strong>all business data</strong> (employees, attendance sessions, punch logs, project sites, geofences, leaves, regularization records, device bindings, and audit trails) and remove all non-admin user accounts.
+                    </p>
+
+                    {resetError && (
+                      <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
+                        {resetError}
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Type <span className="font-mono text-rose-600">RESET ALL DATA</span> to confirm:
+                      </label>
+                      <input
+                        type="text"
+                        value={resetConfirmText}
+                        onChange={(e) => setResetConfirmText(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:bg-white focus:border-rose-500 outline-hidden"
+                        placeholder="RESET ALL DATA"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-end space-x-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsResetModalOpen(false);
+                          setResetConfirmText('');
+                          setResetError('');
+                        }}
+                        className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isResetting || resetConfirmText.trim() !== 'RESET ALL DATA'}
+                        onClick={handleSystemPurge}
+                        className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl transition shadow-xs cursor-pointer flex items-center space-x-1.5"
+                      >
+                        {isResetting ? (
+                          <span>Purging System...</span>
+                        ) : (
+                          <>
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Confirm & Wipe Everything</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </main>
           </>
@@ -564,19 +646,6 @@ export default function App() {
                 >
                   <Calendar className="w-3.5 h-3.5" />
                   <span>Monthly Register</span>
-                </button>
-
-                <button
-                  id="tab-emp-slips"
-                  onClick={() => handleSelectEmpTab('SLIPS')}
-                  className={`px-3.5 py-1.5 rounded-xl flex items-center space-x-2 transition cursor-pointer ${
-                    empActiveTab === 'SLIPS'
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  <Banknote className="w-3.5 h-3.5" />
-                  <span>Salary Slips</span>
                 </button>
 
                 <button
@@ -622,10 +691,8 @@ export default function App() {
               <div className="flex items-center justify-between pb-2 border-b border-slate-200">
                 <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                   {empActiveTab === 'HISTORY' && '📅 Monthly Register'}
-                  {empActiveTab === 'SLIPS' && '💵 Salary Slips'}
                   {empActiveTab === 'LEAVE' && '📄 Leave Requests'}
                   {empActiveTab === 'PROFILE' && '👤 My Profile'}
-                  {empActiveTab === 'TEAM_HIGHLIGHTS' && '🌟 Team Highlights'}
                 </span>
                 <button
                   type="button"
@@ -637,7 +704,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Employee Tab Content Wrapped in Component-Level Error Boundaries */}
+            {/* Employee Tab Content */}
             {empActiveTab === 'SHIFT' && (
               <ErrorBoundary
                 componentName="Shift & Attendance (PunchCard)"
@@ -667,16 +734,6 @@ export default function App() {
               </ErrorBoundary>
             )}
 
-            {empActiveTab === 'SLIPS' && (
-              <ErrorBoundary
-                componentName="Salary Slips"
-                fallbackTitle="Unable to load content"
-                fallbackMessage="The Salary Slips module could not load. Please retry."
-              >
-                <MySalarySlips />
-              </ErrorBoundary>
-            )}
-
             {empActiveTab === 'LEAVE' && (
               <ErrorBoundary
                 componentName="Leave Requests"
@@ -696,21 +753,11 @@ export default function App() {
                 <MyProfile user={currentUser} onUserUpdated={(u) => setCurrentUser(u)} />
               </ErrorBoundary>
             )}
-
-            {empActiveTab === 'TEAM_HIGHLIGHTS' && (
-              <ErrorBoundary
-                componentName="Team Highlights"
-                fallbackTitle="Unable to load content"
-                fallbackMessage="The Team Highlights module could not load. Please retry."
-              >
-                <TeamFeedWidget user={currentUser} />
-              </ErrorBoundary>
-            )}
           </main>
         )}
       </div>
 
-      {/* Clean Professional Corporate Footer */}
+      {/* Corporate Footer */}
       <footer className="bg-white border-t border-slate-200 py-3.5 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-1.5">
           <div className="font-bold text-slate-800 tracking-tight">Milestone Consultancy</div>

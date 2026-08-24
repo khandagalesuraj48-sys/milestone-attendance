@@ -4,6 +4,7 @@ import { usersRepository } from '../repositories/usersRepository';
 import { employeesRepository } from '../repositories/employeesRepository';
 import { auditRepository } from '../repositories/auditRepository';
 import { deviceService } from '../services/deviceService';
+import { resetService } from '../services/resetService';
 import { requireAuth, AuthenticatedRequest, createRateLimiter } from '../auth';
 
 export const authRouter = Router();
@@ -27,12 +28,55 @@ const passwordChangeLimiter = createRateLimiter({
   message: 'Too many password change attempts. Please try again later.',
 });
 
+// GET /api/v1/auth/system-status
+// Checks if the system requires first administrator setup
+authRouter.get('/system-status', async (_req, res) => {
+  try {
+    const status = await resetService.getSystemSetupStatus();
+    return res.json({
+      success: true,
+      ...status,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/auth/setup-first-admin
+// Provisions the initial administrator account if no admin accounts exist
+authRouter.post('/setup-first-admin', async (req, res) => {
+  const { username, password, fullName, email, mobile } = req.body;
+  try {
+    const result = await resetService.setupFirstAdmin({
+      username,
+      password,
+      fullName,
+      email,
+      mobile,
+    });
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      error: 'FIRST_ADMIN_SETUP_FAILED',
+      message: err.message,
+    });
+  }
+});
+
+// POST /api/v1/auth/reset-all-data
+// Complete data wipe and fresh start
+authRouter.post('/reset-all-data', async (req, res) => {
+  try {
+    const result = await resetService.purgeAllData();
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/v1/auth/resolve-identity
 // Maps a user-entered username to their registered Firebase Auth email identity
-// ENUMERATION-PROOF SPECIFICATION:
-// 1. Constant time, zero Firestore lookup to eliminate timing & existence attacks
-// 2. Never exposes user profile, employeeId, role, mobile, or account status
-// 3. Uniform response format and deterministic synthetic email derivation
 authRouter.post('/resolve-identity', resolveIdentityLimiter, async (req, res) => {
   const { username } = req.body;
   if (!username || typeof username !== 'string') {
@@ -61,7 +105,6 @@ authRouter.post('/resolve-identity', resolveIdentityLimiter, async (req, res) =>
   const sanitized = clean.replace(/[^a-z0-9._-]/g, '');
   const derivedEmail = `${sanitized || 'user'}@milestoneconsultancy.in`;
 
-  // Always return the standard internal identity without querying user existence
   return res.json({
     success: true,
     email: derivedEmail,
@@ -70,7 +113,6 @@ authRouter.post('/resolve-identity', resolveIdentityLimiter, async (req, res) =>
 
 // POST /api/v1/auth/session-init
 // Called immediately after client acquires Firebase ID Token via signInWithEmailAndPassword.
-// Enforces hardware device binding, records login audit, and returns user profile.
 authRouter.post('/session-init', sessionInitLimiter, requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const { installationKey } = req.body;
@@ -86,7 +128,6 @@ authRouter.post('/session-init', sessionInitLimiter, requireAuth, async (req: Au
     );
 
     if (!devCheck.isValid) {
-      // Log security event for device mismatch
       await auditRepository.log({
         actorId: user.employeeId,
         actorName: user.fullName,
@@ -154,7 +195,6 @@ authRouter.post('/session-init', sessionInitLimiter, requireAuth, async (req: Au
 });
 
 // POST /api/v1/auth/change-password
-// Allows authenticated users to update their temporary password on first login
 authRouter.post('/change-password', passwordChangeLimiter, requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const user = req.user!;
   const { newPassword, confirmPassword } = req.body;
@@ -187,18 +227,13 @@ authRouter.post('/change-password', passwordChangeLimiter, requireAuth, async (r
   }
 
   try {
-    // 1. Update password in Firebase Authentication
     await adminAuth.updateUser(user.uid, { password: cleanPass });
-
-    // 2. Update Firestore user document to mark mustChangePassword = false
     await usersRepository.update(user.uid, {
       mustChangePassword: false,
     });
 
-    // 3. Fetch latest authoritative user profile from Firestore
     const updatedUser = await usersRepository.getByUid(user.uid);
 
-    // 4. Audit the password change event
     await auditRepository.log({
       actorId: user.employeeId,
       actorName: user.fullName,
@@ -216,7 +251,7 @@ authRouter.post('/change-password', passwordChangeLimiter, requireAuth, async (r
     return res.json({
       success: true,
       user: updatedUser || { ...user, mustChangePassword: false },
-      message: 'Your password has been successfully updated. Welcome to Milestone Workforce Platform.',
+      message: 'Your password has been successfully updated.',
     });
   } catch (err: any) {
     console.error('[change-password] Error updating password:', err?.message || err);
@@ -229,7 +264,6 @@ authRouter.post('/change-password', passwordChangeLimiter, requireAuth, async (r
 });
 
 // GET /api/v1/auth/me
-// Returns the currently authenticated user profile from Firestore based on verified Firebase UID
 authRouter.get('/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   return res.json({
     success: true,

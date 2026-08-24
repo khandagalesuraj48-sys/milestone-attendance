@@ -10,6 +10,23 @@ import { DeviceBinding } from '../../src/types';
 const COLLECTION = 'devices';
 
 export const devicesRepository = {
+  async getAll(): Promise<DeviceBinding[]> {
+    if (isRemoteFirestoreActive()) {
+      try {
+        const snap = await adminDb.collection(COLLECTION).get();
+        const list = snap.docs.map((doc) => ({ ...doc.data(), deviceId: doc.id, id: doc.id } as DeviceBinding));
+        for (const d of list) storageEngine.setDoc(COLLECTION, d.deviceId, d);
+        return list;
+      } catch (err: any) {
+        if (isFirestorePermissionOrNetworkError(err)) {
+          markFirestoreUnavailable(err);
+        }
+      }
+    }
+
+    return storageEngine.getAllDocs<DeviceBinding>(COLLECTION);
+  },
+
   async getById(deviceId: string): Promise<DeviceBinding | null> {
     if (isRemoteFirestoreActive()) {
       try {

@@ -361,6 +361,10 @@ export const attendanceRepository = {
     return docData;
   },
 
+  async saveCorrection(correction: AttendanceCorrection): Promise<AttendanceCorrection> {
+    return this.createCorrection(correction);
+  },
+
   async getCorrectionsForRecord(recordId: string): Promise<AttendanceCorrection[]> {
     if (isRemoteFirestoreActive()) {
       try {

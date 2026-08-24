@@ -7,11 +7,8 @@ import {
   Calendar,
   FileText,
   User as UserIcon,
-  Sparkles,
   LogOut,
   ChevronRight,
-  ShieldCheck,
-  Banknote,
 } from 'lucide-react';
 
 interface EmployeeMenuDrawerProps {
@@ -19,7 +16,7 @@ interface EmployeeMenuDrawerProps {
   onClose: () => void;
   user: User | null;
   currentTab: string;
-  onSelectTab: (tab: 'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE' | 'TEAM_HIGHLIGHTS' | 'SLIPS') => void;
+  onSelectTab: (tab: 'SHIFT' | 'HISTORY' | 'LEAVE' | 'PROFILE') => void;
   onLogout: () => void;
   siteName?: string;
 }
@@ -31,7 +28,6 @@ export const EmployeeMenuDrawer: React.FC<EmployeeMenuDrawerProps> = ({
   currentTab,
   onSelectTab,
   onLogout,
-  siteName,
 }) => {
   if (!isOpen || !user) return null;
 
@@ -51,13 +47,6 @@ export const EmployeeMenuDrawer: React.FC<EmployeeMenuDrawerProps> = ({
       color: 'text-blue-500 bg-blue-50 border-blue-200',
     },
     {
-      id: 'SLIPS' as const,
-      label: 'Salary Slips',
-      description: 'Monthly vouchers, net pay & earnings',
-      icon: Banknote,
-      color: 'text-emerald-600 bg-emerald-50 border-emerald-200',
-    },
-    {
       id: 'LEAVE' as const,
       label: 'Leave Requests',
       description: 'Submit & view leave applications',
@@ -70,13 +59,6 @@ export const EmployeeMenuDrawer: React.FC<EmployeeMenuDrawerProps> = ({
       description: 'Personal details, credentials & photo',
       icon: UserIcon,
       color: 'text-purple-500 bg-purple-50 border-purple-200',
-    },
-    {
-      id: 'TEAM_HIGHLIGHTS' as const,
-      label: 'Team Highlights & Camaraderie',
-      description: 'New members, birthdays & milestones',
-      icon: Sparkles,
-      color: 'text-amber-600 bg-amber-50/80 border-amber-200',
     },
   ];
 
