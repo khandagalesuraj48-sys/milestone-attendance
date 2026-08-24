@@ -108,24 +108,7 @@ export const api = {
 
   request,
 
-  // SYSTEM SETUP & FIRST-ADMIN STATUS
-  async getSystemStatus(): Promise<{ success: boolean; isFirstSetupRequired: boolean; adminCount: number; employeeCount: number }> {
-    return request('/api/v1/auth/system-status');
-  },
-
-  async setupFirstAdmin(payload: {
-    username: string;
-    password: string;
-    fullName: string;
-    email?: string;
-    mobile?: string;
-  }): Promise<{ success: boolean; user: User; message: string }> {
-    return request('/api/v1/auth/setup-first-admin', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-
+  // SYSTEM RESET
   async purgeAllData(): Promise<{ success: boolean; message: string }> {
     return request('/api/v1/admin/system/reset-data', {
       method: 'POST',
@@ -417,7 +400,7 @@ export const api = {
     });
   },
 
-  async updateEmployee(id: string, payload: Partial<Employee> & { resetHardwareBinding?: boolean; salaryStructure?: any }): Promise<{ success: boolean; message: string; employee: Employee }> {
+  async updateEmployee(id: string, payload: Partial<Employee> & { resetHardwareBinding?: boolean }): Promise<{ success: boolean; message: string; employee: Employee }> {
     return request(`/api/v1/admin/employees/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),

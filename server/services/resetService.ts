@@ -1,7 +1,6 @@
 import { adminDb, adminAuth } from '../firebaseAdmin';
 import { storageEngine, isRemoteFirestoreActive } from '../lib/storageEngine';
 import { usersRepository } from '../repositories/usersRepository';
-import { User } from '../../src/types';
 
 export const resetService = {
   /**
@@ -27,9 +26,6 @@ export const resetService = {
       'audit',
       'audit_logs',
       'notifications',
-      'holidays',
-      'payroll_runs',
-      'payroll_items',
       'master_register',
       'master_register_summaries',
       'master_register_entries',
@@ -161,85 +157,5 @@ export const resetService = {
         employeeCount: 0,
       };
     }
-  },
-
-  /**
-   * Creates the first administrator account if needed
-   */
-  async setupFirstAdmin(params: {
-    username: string;
-    password: string;
-    fullName: string;
-    email?: string;
-    mobile?: string;
-  }): Promise<{ success: boolean; user: User; message: string }> {
-    const cleanUsername = params.username.trim().toLowerCase();
-    const cleanEmail = (params.email || `${cleanUsername}@milestoneconsultancy.in`).trim().toLowerCase();
-    const cleanFullName = params.fullName.trim();
-    const cleanPassword = params.password.trim();
-
-    if (!cleanUsername || cleanUsername.length < 3) {
-      throw new Error('Admin username must be at least 3 characters long.');
-    }
-    if (!cleanPassword || cleanPassword.length < 8) {
-      throw new Error('Admin password must be at least 8 characters long.');
-    }
-    if (!cleanFullName) {
-      throw new Error('Administrator full name is required.');
-    }
-
-    // 1. Create or resolve Firebase Auth user
-    let uid: string;
-    try {
-      let existingAuthUser = null;
-      try {
-        existingAuthUser = await adminAuth.getUserByEmail(cleanEmail);
-      } catch {}
-
-      if (existingAuthUser) {
-        uid = existingAuthUser.uid;
-        // Update password for the existing admin account
-        await adminAuth.updateUser(uid, { password: cleanPassword, displayName: cleanFullName });
-      } else {
-        const authRecord = await adminAuth.createUser({
-          email: cleanEmail,
-          password: cleanPassword,
-          displayName: cleanFullName,
-        });
-        uid = authRecord.uid;
-      }
-    } catch (authErr: any) {
-      console.error('[ResetService] Auth user handling note:', authErr);
-      throw new Error(`Failed to configure administrator auth account: ${authErr.message}`);
-    }
-
-    // 2. Create or update authoritative Firestore User profile
-    const nowIso = new Date().toISOString();
-    const adminUser: User = {
-      uid,
-      id: uid,
-      employeeId: 'ADM-001',
-      username: cleanUsername,
-      email: cleanEmail,
-      fullName: cleanFullName,
-      role: 'admin',
-      accountStatus: 'ACTIVE',
-      mustChangePassword: false,
-      department: 'Executive Leadership',
-      designation: 'System Administrator',
-      lastLoginAt: nowIso,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-
-    await usersRepository.create(uid, adminUser);
-
-    console.log(`[ResetService] Successfully confirmed administrator: ${cleanUsername} (${cleanEmail})`);
-
-    return {
-      success: true,
-      user: adminUser,
-      message: 'Administrator account confirmed. You may now sign in using your existing admin credentials.',
-    };
   },
 };

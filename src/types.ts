@@ -88,47 +88,8 @@ export interface Employee {
   accountStatus: AccountStatus;
   boundHardwareSignature: string | null;
   activeDeviceId: string | null;
-  salaryStructure?: SalaryStructure;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface BankDetails {
-  bankName: string;
-  accountNumber: string;
-  ifscCode: string;
-  panNumber: string;
-  uanNumber: string;
-  epfNumber?: string;
-}
-
-export interface SalaryStructure {
-  monthlyGross: number;
-  monthlyGrossCtc: number;
-  basicSalary: number;
-  hra: number;
-  specialAllowance: number;
-  conveyanceAllowance: number;
-  medicalAllowance: number;
-  otherAllowances: number;
-  pfDeductionType: 'EXEMPT' | 'FIXED' | 'STANDARD_12_PERCENT' | string;
-  pfPercentage: number;
-  pfFixedAmount: number;
-  ptDeductionEnabled: boolean;
-  ptStateSlab: string;
-  tdsMonthlyAmount: number;
-  effectiveFrom: string;
-  bankDetails: BankDetails;
-}
-
-export interface Holiday {
-  id: string;
-  date: string;
-  name: string;
-  type?: 'NATIONAL' | 'STATE' | 'COMPANY' | string;
-  isOptional?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
 }
 
 export interface Coordinates {

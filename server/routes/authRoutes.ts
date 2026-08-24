@@ -28,42 +28,6 @@ const passwordChangeLimiter = createRateLimiter({
   message: 'Too many password change attempts. Please try again later.',
 });
 
-// GET /api/v1/auth/system-status
-// Checks if the system requires first administrator setup
-authRouter.get('/system-status', async (_req, res) => {
-  try {
-    const status = await resetService.getSystemSetupStatus();
-    return res.json({
-      success: true,
-      ...status,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/v1/auth/setup-first-admin
-// Provisions the initial administrator account if no admin accounts exist
-authRouter.post('/setup-first-admin', async (req, res) => {
-  const { username, password, fullName, email, mobile } = req.body;
-  try {
-    const result = await resetService.setupFirstAdmin({
-      username,
-      password,
-      fullName,
-      email,
-      mobile,
-    });
-    return res.json(result);
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: 'FIRST_ADMIN_SETUP_FAILED',
-      message: err.message,
-    });
-  }
-});
-
 // POST /api/v1/auth/reset-all-data
 // Complete data wipe and fresh start
 authRouter.post('/reset-all-data', async (req, res) => {

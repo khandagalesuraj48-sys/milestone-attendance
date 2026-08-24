@@ -242,7 +242,7 @@ export const LeaveRequestCard: React.FC = () => {
             </span>
           </div>
           <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-800 col-span-2 sm:col-span-1">
-            <span className="text-[10px] text-slate-400 block font-medium">Sunday & Holidays</span>
+            <span className="text-[10px] text-slate-400 block font-medium">Weekly Offs</span>
             <span className="text-[11px] font-semibold text-emerald-400">Exempt from deductions</span>
           </div>
         </div>
